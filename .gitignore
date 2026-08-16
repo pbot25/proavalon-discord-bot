@@ -1,0 +1,21 @@
+# Environment variables
+.env
+
+# Python virtual environment
+.venv/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Debug profile HTML
+debug_profiles/
+
+# Local SQLite database
+data/
+
+# VS Code workspace settings
+.vscode/
+
+# macOS
+.DS_Store
