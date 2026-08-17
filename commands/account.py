@@ -16,7 +16,7 @@ from database.account_links import (
     unlink_discord_account,
 )
 
-from database.seasons import get_active_season
+from database.seasons import get_active_season, register_season_player
 from proavalon.profile_scraper import (
     ProAvalonError,
     ProAvalonLoginError,
@@ -205,6 +205,20 @@ class AccountCommands(
                 proavalon_username=canonical_username,
                 season_number=target_season_number,
             )
+
+            # Linking an account for the active season registers it immediately,
+            # even before the player has played a game.
+            if (
+                season is not None
+                and target_season_number == int(season["season_number"])
+                and canonical_username.casefold().startswith(
+                    str(season["required_prefix"]).casefold()
+                )
+            ):
+                await register_season_player(
+                    community_season_id=int(season["id"]),
+                    proavalon_username=canonical_username,
+                )
 
         except (
             DiscordAccountAlreadyLinkedError,
@@ -454,6 +468,19 @@ class AdminAccountCommands(
                 proavalon_username=canonical_username,
                 season_number=target_season_number,
             )
+
+            # Admin-created links count as registered immediately too.
+            if (
+                season is not None
+                and target_season_number == int(season["season_number"])
+                and canonical_username.casefold().startswith(
+                    str(season["required_prefix"]).casefold()
+                )
+            ):
+                await register_season_player(
+                    community_season_id=int(season["id"]),
+                    proavalon_username=canonical_username,
+                )
 
         except (
             DiscordAccountAlreadyLinkedError,

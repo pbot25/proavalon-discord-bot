@@ -440,6 +440,41 @@ async def get_registered_players_with_links(
 ):
     database = await connect()
     try:
+        # Backfill season_players from already-saved account links. This makes
+        # /season registered-players include linked users with 0 games, including
+        # links created before this fix. Explicitly voided usernames stay excluded.
+        await database.execute(
+            """
+            INSERT OR IGNORE INTO season_players (
+                community_season_id,
+                proavalon_username,
+                first_seen_at,
+                last_seen_at
+            )
+            SELECT
+                community_seasons.id,
+                account_links.proavalon_username,
+                account_links.linked_at,
+                account_links.linked_at
+            FROM community_seasons
+            INNER JOIN account_links
+                ON account_links.guild_id = community_seasons.guild_id
+               AND account_links.season_number = community_seasons.season_number
+               AND account_links.is_active = 1
+            LEFT JOIN season_voided_players
+                ON season_voided_players.community_season_id = community_seasons.id
+               AND season_voided_players.proavalon_username =
+                    account_links.proavalon_username COLLATE NOCASE
+            WHERE community_seasons.id = ?
+              AND community_seasons.guild_id = ?
+              AND season_voided_players.id IS NULL
+              AND account_links.proavalon_username LIKE
+                    community_seasons.required_prefix || '%' COLLATE NOCASE
+            """,
+            (community_season_id, _guild_id_text(guild_id)),
+        )
+        await database.commit()
+
         cursor = await database.execute(
             """
             SELECT

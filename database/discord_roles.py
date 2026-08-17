@@ -224,6 +224,31 @@ async def get_assignment(guild_id: int, assignment_key: str):
         await database.close()
 
 
+async def get_award_assignments(guild_id: int, role_key: str):
+    """Return all tracked holders for one award, including legacy single-holder rows."""
+    database = await connect()
+    try:
+        cursor = await database.execute(
+            """
+            SELECT assignment_key, discord_user_id, role_id
+            FROM discord_role_assignments
+            WHERE guild_id = ?
+              AND (
+                    assignment_key = ?
+                 OR assignment_key LIKE ?
+              )
+            """,
+            (
+                _guild(guild_id),
+                role_key,
+                f"{role_key}:%",
+            ),
+        )
+        return await cursor.fetchall()
+    finally:
+        await database.close()
+
+
 async def set_assignment(
     guild_id: int,
     assignment_key: str,

@@ -15,6 +15,7 @@ from database.discord_roles import (
     clear_role_config,
     get_active_season_linked_users,
     get_assignment,
+    get_award_assignments,
     get_award_minimum_games,
     get_known_ratings,
     get_rank_assignments,
@@ -65,7 +66,7 @@ class RoleSyncResult:
         self.members = 0
         self.profile_failures = 0
         self.errors: list[str] = []
-        self.award_winners: dict[str, str] = {}
+        self.award_winners: dict[str, list[str]] = {}
 
 
 def normalize_bracket(value: str | None) -> str:
@@ -141,38 +142,53 @@ class DiscordRoleCommands(
         except (discord.Forbidden, discord.HTTPException) as error:
             result.errors.append(f"Could not add {role.name}: {error}")
 
-    async def _set_award_holder(
+    async def _set_award_holders(
         self,
         guild: discord.Guild,
         role_key: str,
         role: discord.Role | None,
-        winner_id: int | None,
-        winner_username: str | None,
+        winners: list[tuple[int, str]],
         result: RoleSyncResult,
     ) -> None:
-        assignment = await get_assignment(guild.id, role_key)
-        if assignment is not None:
+        """Synchronize one award role to every player tied for the lead."""
+        desired_ids = {user_id for user_id, _ in winners}
+
+        assignments = await get_award_assignments(guild.id, role_key)
+        for assignment in assignments:
+            assignment_key = str(assignment["assignment_key"])
             old_id = int(assignment["discord_user_id"])
             old_role = guild.get_role(int(assignment["role_id"]))
-            if winner_id != old_id or role is None or old_role != role:
+
+            if role is None or old_role != role or old_id not in desired_ids:
                 await self._remove_role_from_member(
                     await fetch_member(guild, old_id),
                     old_role,
                     result,
                 )
-                await clear_assignment(guild.id, role_key)
 
-        if role is None or winner_id is None:
+            # Rebuild tracking with one row per tied winner.
+            await clear_assignment(guild.id, assignment_key)
+
+        if role is None or not winners:
             return
 
-        winner = await fetch_member(guild, winner_id)
-        if winner is None:
-            return
+        applied_names: list[str] = []
+        for winner_id, winner_username in winners:
+            winner = await fetch_member(guild, winner_id)
+            if winner is None:
+                continue
 
-        await self._add_role_to_member(winner, role, result)
-        await set_assignment(guild.id, role_key, winner_id, role.id)
-        if winner_username:
-            result.award_winners[role_key] = winner_username
+            await self._add_role_to_member(winner, role, result)
+            await set_assignment(
+                guild.id,
+                f"{role_key}:{winner_id}",
+                winner_id,
+                role.id,
+            )
+            applied_names.append(winner_username)
+
+        if applied_names:
+            result.award_winners[role_key] = applied_names
 
     async def sync_guild(self, guild: discord.Guild) -> RoleSyncResult:
         result = RoleSyncResult()
@@ -284,12 +300,17 @@ class DiscordRoleCommands(
                     guild.id, assignment_key, user_id, desired_role.id
                 )
 
-        needs_alignment_awards = any(
+        needs_award_profiles = any(
             key in configs
-            for key in ("award_best_resistance", "award_best_spy")
+            for key in (
+                "award_best_resistance",
+                "award_best_spy",
+                "award_highest_rating",
+                "award_lowest_rating",
+            )
         )
 
-        if needs_alignment_awards:
+        if needs_award_profiles:
             for _, username in linked:
                 key = username.casefold()
                 if key in profiles:
@@ -326,10 +347,11 @@ class DiscordRoleCommands(
                 "res_wr": (res_w / (res_w + res_l) * 100) if res_w + res_l else 0.0,
                 "spy_games": spy_w + spy_l,
                 "spy_wr": (spy_w / (spy_w + spy_l) * 100) if spy_w + spy_l else 0.0,
+                "overall_games": res_w + res_l + spy_w + spy_l,
                 "rating": rating,
             }
 
-        def best_alignment(metric: str):
+        def best_alignment(metric: str) -> list[dict]:
             games_key = f"{metric}_games"
             wr_key = f"{metric}_wr"
             eligible = [
@@ -338,57 +360,73 @@ class DiscordRoleCommands(
                 if item[games_key] >= minimum_games
             ]
             if not eligible:
-                return None
-            return max(
-                eligible,
-                key=lambda item: (
-                    item[wr_key],
-                    item[games_key],
-                    item["rating"],
-                    item["username"].casefold(),
-                ),
-            )
+                return []
+
+            best_wr = max(item[wr_key] for item in eligible)
+            return [
+                item
+                for item in eligible
+                if item[wr_key] == best_wr
+            ]
 
         best_res = best_alignment("res")
         best_spy = best_alignment("spy")
 
-        for role_key, winner in (
+        for role_key, winners in (
             ("award_best_resistance", best_res),
             ("award_best_spy", best_spy),
         ):
             role_id = configs.get(role_key)
             role = manageable_role(guild, role_id) if role_id else None
-            await self._set_award_holder(
+            await self._set_award_holders(
                 guild,
                 role_key,
                 role,
-                winner["user_id"] if winner else None,
-                winner["username"] if winner else None,
+                [
+                    (int(winner["user_id"]), str(winner["username"]))
+                    for winner in winners
+                ],
                 result,
             )
 
         rated_candidates = []
         for user_id, username in linked:
             rating_data = ratings.get(username.casefold())
-            if rating_data is not None:
+            candidate = candidate_by_username.get(username.casefold())
+            # Highest/lowest rating awards require at least one tracked game.
+            # A freshly linked 0-GP account must not receive either award.
+            if (
+                rating_data is not None
+                and candidate is not None
+                and candidate["overall_games"] >= 1
+            ):
                 rated_candidates.append(
                     (int(rating_data[0]), user_id, username)
                 )
 
-        highest = max(rated_candidates, default=None)
-        lowest = min(rated_candidates, default=None)
-        for role_key, winner in (
-            ("award_highest_rating", highest),
-            ("award_lowest_rating", lowest),
+        highest_winners: list[tuple[int, int, str]] = []
+        lowest_winners: list[tuple[int, int, str]] = []
+        if rated_candidates:
+            highest_rating = max(item[0] for item in rated_candidates)
+            lowest_rating = min(item[0] for item in rated_candidates)
+            highest_winners = [
+                item for item in rated_candidates if item[0] == highest_rating
+            ]
+            lowest_winners = [
+                item for item in rated_candidates if item[0] == lowest_rating
+            ]
+
+        for role_key, winners in (
+            ("award_highest_rating", highest_winners),
+            ("award_lowest_rating", lowest_winners),
         ):
             role_id = configs.get(role_key)
             role = manageable_role(guild, role_id) if role_id else None
-            await self._set_award_holder(
+            await self._set_award_holders(
                 guild,
                 role_key,
                 role,
-                winner[1] if winner else None,
-                winner[2] if winner else None,
+                [(winner[1], winner[2]) for winner in winners],
                 result,
             )
 
@@ -580,8 +618,9 @@ class DiscordRoleCommands(
         await interaction.response.defer(thinking=True, ephemeral=True)
         result = await self.sync_guild(interaction.guild)
         award_lines = [
-            f"**{ROLE_TARGET_NAMES[key]}:** `{username}`"
-            for key, username in result.award_winners.items()
+            f"**{ROLE_TARGET_NAMES[key]}:** "
+            + ", ".join(f"`{username}`" for username in usernames)
+            for key, usernames in result.award_winners.items()
         ]
         text = (
             f"Role sync complete for **{result.members} linked season player(s)**.\n"
