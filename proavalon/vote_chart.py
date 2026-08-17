@@ -41,33 +41,22 @@ def _center_text(
     draw.text((x, y), text, fill=fill, font=font)
 
 
-def _draw_green_check(
+def _draw_black_x(
     draw: ImageDraw.ImageDraw,
     box: tuple[int, int, int, int],
-    font,
 ) -> None:
-    """Draw an emoji-style green check without relying on emoji fonts."""
+    """Draw a large black X for a player included on the proposed mission."""
     left, top, right, bottom = box
-    size = min(24, right - left - 10, bottom - top - 10)
-    check_left = left + ((right - left) - size) / 2
-    check_top = top + ((bottom - top) - size) / 2
-    check_box = (
-        check_left,
-        check_top,
-        check_left + size,
-        check_top + size,
+    padding = 11
+    draw.line(
+        (left + padding, top + padding, right - padding, bottom - padding),
+        fill="#111111",
+        width=5,
     )
-    draw.rounded_rectangle(
-        check_box,
-        radius=4,
-        fill="#20a447",
-    )
-    _center_text(
-        draw,
-        check_box,
-        "✓",
-        font=font,
-        fill="white",
+    draw.line(
+        (right - padding, top + padding, left + padding, bottom - padding),
+        fill="#111111",
+        width=5,
     )
 
 
@@ -106,7 +95,6 @@ def build_vote_history_png(game_data: dict) -> bytes | None:
     player_font = _font(15)
     header_font = _font(15, True)
     pick_font = _font(12, True)
-    check_font = _font(18, True)
 
     mission_history = game_data.get("missionHistory") or []
 
@@ -197,10 +185,10 @@ def build_vote_history_png(game_data: dict) -> bytes | None:
                 cell_box, fill=cell_fill, outline="#8a8a8a", width=1
             )
 
-            # Color already communicates the vote. The proposed mission
-            # team is marked with a green emoji-style check.
+            # Color communicates approve/reject. A large black X marks
+            # players included on the proposed mission team.
             if "VHpicked" in token:
-                _draw_green_check(draw, cell_box, check_font)
+                _draw_black_x(draw, cell_box)
 
             if "VHleader" in token:
                 draw.rectangle(

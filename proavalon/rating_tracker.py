@@ -302,14 +302,65 @@ class ProAvalonRatingTracker:
                 })
             canonical = json.dumps({"room":room_id,"players":[x.casefold() for x in real_players],"winner":data.get("winner"),"missions":data.get("missionHistory"),"votes":data.get("voteHistory")}, sort_keys=True, separators=(",",":"))
             fingerprint = hashlib.sha256(canonical.encode()).hexdigest()
+            affected_guild_ids = set()
             for sid, season in state["seasons"].items():
                 inserted = await save_match(season_id=sid,fingerprint=fingerprint,room_id=room_id,detected_at=state["detected_at"],winner=data.get("winner"),game_mode=(self._games.get(room_id) or {}).get("gameMode"),mission_history=data.get("missionHistory") or [],fails_history=data.get("numFailsHistory") or [],vote_history=data.get("voteHistory"),players=real_players,roles=roles,rating_changes=changes)
                 if inserted:
+                    affected_guild_ids.add(int(season["guild_id"]))
                     await self._post_match(season, fingerprint, data, changes)
+
+            # Do not wait for the 15-minute safety sync. Every newly archived
+            # qualifying match immediately recalculates the affected server's
+            # rank, rating, and WR roles.
+            if affected_guild_ids:
+                await self._sync_roles_after_match(
+                    affected_guild_ids,
+                    real_players,
+                )
+
             self._tracked.pop(room_id, None)
             self._room_rosters.pop(room_id, None)
         finally:
             self._finalizing.discard(room_id)
+
+    async def _sync_roles_after_match(self, guild_ids, player_usernames):
+        """Immediately refresh configured Discord roles after a saved match."""
+        if self.bot is None or not guild_ids:
+            return
+
+        # Player profile stats can otherwise remain cached for up to 15 minutes.
+        # Drop the ten participants so the role sync sees the just-finished game.
+        for username in player_usernames:
+            if isinstance(username, str):
+                self.bot.profile_cache.remove(username)
+
+        role_cog = self.bot.get_cog("DiscordRoleCommands")
+        if role_cog is None:
+            print("Could not run post-match role sync: DiscordRoleCommands cog is not loaded.")
+            return
+
+        for guild_id in sorted(guild_ids):
+            guild = self.bot.get_guild(int(guild_id))
+            if guild is None:
+                print(f"Could not run post-match role sync: guild {guild_id} is not cached.")
+                continue
+
+            try:
+                result = await role_cog.sync_guild(guild)
+                print(
+                    f"Post-match role sync complete for guild {guild_id}: "
+                    f"{result.added} added, {result.removed} removed."
+                )
+                if result.errors:
+                    print(
+                        f"Post-match role sync warnings for guild {guild_id}: "
+                        + " | ".join(result.errors)
+                    )
+            except Exception as error:
+                print(
+                    f"Post-match role sync failed for guild {guild_id}: "
+                    f"{type(error).__name__}: {error}"
+                )
 
     async def _post_match(self, season, fingerprint, data, changes):
         if self.bot is None:
