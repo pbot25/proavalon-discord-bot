@@ -45,18 +45,20 @@ def _draw_black_x(
     draw: ImageDraw.ImageDraw,
     box: tuple[int, int, int, int],
 ) -> None:
-    """Draw a large black X for a player included on the proposed mission."""
+    """Draw a large black X for a player proposed on the mission team."""
     left, top, right, bottom = box
-    padding = 11
+    pad_x = max(9, int((right - left) * 0.22))
+    pad_y = max(7, int((bottom - top) * 0.20))
+    width = max(4, int(min(right - left, bottom - top) * 0.12))
     draw.line(
-        (left + padding, top + padding, right - padding, bottom - padding),
+        (left + pad_x, top + pad_y, right - pad_x, bottom - pad_y),
         fill="#111111",
-        width=5,
+        width=width,
     )
     draw.line(
-        (right - padding, top + padding, left + padding, bottom - padding),
+        (right - pad_x, top + pad_y, left + pad_x, bottom - pad_y),
         fill="#111111",
-        width=5,
+        width=width,
     )
 
 
@@ -185,8 +187,8 @@ def build_vote_history_png(game_data: dict) -> bytes | None:
                 cell_box, fill=cell_fill, outline="#8a8a8a", width=1
             )
 
-            # Color communicates approve/reject. A large black X marks
-            # players included on the proposed mission team.
+            # Color communicates approve/reject; a large black X marks
+            # players who were proposed for the mission team.
             if "VHpicked" in token:
                 _draw_black_x(draw, cell_box)
 

@@ -17,6 +17,7 @@ from database.ratings import (
     load_rating_cache,
     upsert_online_ratings,
 )
+from database.discord_roles import get_active_season_linked_users
 from database.seasons import (
     get_all_active_seasons,
     register_season_player,
@@ -302,67 +303,83 @@ class ProAvalonRatingTracker:
                 })
             canonical = json.dumps({"room":room_id,"players":[x.casefold() for x in real_players],"winner":data.get("winner"),"missions":data.get("missionHistory"),"votes":data.get("voteHistory")}, sort_keys=True, separators=(",",":"))
             fingerprint = hashlib.sha256(canonical.encode()).hexdigest()
-            affected_guild_ids = set()
             for sid, season in state["seasons"].items():
                 inserted = await save_match(season_id=sid,fingerprint=fingerprint,room_id=room_id,detected_at=state["detected_at"],winner=data.get("winner"),game_mode=(self._games.get(room_id) or {}).get("gameMode"),mission_history=data.get("missionHistory") or [],fails_history=data.get("numFailsHistory") or [],vote_history=data.get("voteHistory"),players=real_players,roles=roles,rating_changes=changes)
                 if inserted:
-                    affected_guild_ids.add(int(season["guild_id"]))
-                    await self._post_match(season, fingerprint, data, changes)
-
-            # Do not wait for the 15-minute safety sync. Every newly archived
-            # qualifying match immediately recalculates the affected server's
-            # rank, rating, and WR roles.
-            if affected_guild_ids:
-                await self._sync_roles_after_match(
-                    affected_guild_ids,
-                    real_players,
-                )
-
+                    # Refresh Discord roles immediately after every newly archived
+                    # qualifying match. The 15-minute task remains only a backup.
+                    role_sync_result = await self._sync_roles_after_match(
+                        season, real_players
+                    )
+                    await self._post_match(
+                        season, fingerprint, data, changes, role_sync_result
+                    )
             self._tracked.pop(room_id, None)
             self._room_rosters.pop(room_id, None)
         finally:
             self._finalizing.discard(room_id)
 
-    async def _sync_roles_after_match(self, guild_ids, player_usernames):
-        """Immediately refresh configured Discord roles after a saved match."""
-        if self.bot is None or not guild_ids:
-            return
+    async def _sync_roles_after_match(self, season, players):
+        """Immediately reconcile Discord roles after one archived match."""
+        if self.bot is None:
+            return None
 
-        # Player profile stats can otherwise remain cached for up to 15 minutes.
-        # Drop the ten participants so the role sync sees the just-finished game.
-        for username in player_usernames:
+        guild = self.bot.get_guild(int(season["guild_id"]))
+        if guild is None:
+            return None
+
+        role_cog = self.bot.get_cog("DiscordRoleCommands")
+        if role_cog is None or not hasattr(role_cog, "sync_guild"):
+            print(
+                f"Could not immediately sync roles for guild {guild.id}: "
+                "DiscordRoleCommands cog is unavailable."
+            )
+            return None
+
+        # Match participants are the only profiles whose game totals/WR just
+        # changed, so evict them before the role sync requests fresh profiles.
+        for username in players:
             if isinstance(username, str):
                 self.bot.profile_cache.remove(username)
 
-        role_cog = self.bot.get_cog("DiscordRoleCommands")
-        if role_cog is None:
-            print("Could not run post-match role sync: DiscordRoleCommands cog is not loaded.")
-            return
-
-        for guild_id in sorted(guild_ids):
-            guild = self.bot.get_guild(int(guild_id))
-            if guild is None:
-                print(f"Could not run post-match role sync: guild {guild_id} is not cached.")
-                continue
-
-            try:
-                result = await role_cog.sync_guild(guild)
+        try:
+            result = await role_cog.sync_guild(guild)
+            print(
+                f"Immediate role sync after match for guild {guild.id}: "
+                f"+{result.added} / -{result.removed}"
+            )
+            if result.errors:
                 print(
-                    f"Post-match role sync complete for guild {guild_id}: "
-                    f"{result.added} added, {result.removed} removed."
+                    f"Immediate role sync warnings for guild {guild.id}: "
+                    + " | ".join(result.errors)
                 )
-                if result.errors:
-                    print(
-                        f"Post-match role sync warnings for guild {guild_id}: "
-                        + " | ".join(result.errors)
-                    )
-            except Exception as error:
-                print(
-                    f"Post-match role sync failed for guild {guild_id}: "
-                    f"{type(error).__name__}: {error}"
-                )
+            return result
+        except Exception as error:
+            # Never let a Discord-role error prevent match archival/history.
+            print(
+                f"Immediate role sync failed for guild {guild.id}: "
+                f"{type(error).__name__}: {error}"
+            )
+            return None
 
-    async def _post_match(self, season, fingerprint, data, changes):
+    async def _player_display_map(self, season) -> dict[str, str]:
+        """Map linked ProAvalon usernames to Discord mentions for this season."""
+        try:
+            rows = await get_active_season_linked_users(
+                int(season["guild_id"]),
+                int(season["season_number"]),
+            )
+        except Exception:
+            return {}
+
+        return {
+            str(row["proavalon_username"]).casefold():
+                f"<@{int(row['discord_user_id'])}>"
+            for row in rows
+            if row["discord_user_id"] is not None
+        }
+
+    async def _post_match(self, season, fingerprint, data, changes, role_sync_result=None):
         if self.bot is None:
             return
         configs = await get_enabled_match_configs()
@@ -379,7 +396,18 @@ class ProAvalonRatingTracker:
         if missions:
             icons = ["✅" if str(x).casefold()=="succeeded" else "❌" if str(x).casefold()=="failed" else "➖" for x in missions]
             embed.add_field(name="Missions", value=" ".join(icons), inline=False)
-        rank_lines = []
+        player_update_lines: list[str] = []
+        display_map = await self._player_display_map(season)
+        rank_order = {
+            "unranked": 0,
+            "iron": 1,
+            "bronze": 2,
+            "silver": 3,
+            "gold": 4,
+            "platinum": 5,
+            "diamond": 6,
+            "champion": 7,
+        }
 
         role_order = {
             # Resistance: 2 VTs, lovers, Percival, Merlin.
@@ -432,11 +460,27 @@ class ProAvalonRatingTracker:
 
             old = item.get("old_bracket")
             new = item.get("new_bracket")
-            if old and new and old != new:
-                rank_lines.append(
-                    f"`{item['username']}`: "
-                    f"**{old.title()} → {new.title()}**"
+            if old and new and str(old).casefold() != str(new).casefold():
+                old_key = str(old).casefold()
+                new_key = str(new).casefold()
+                display = display_map.get(
+                    str(item["username"]).casefold(),
+                    f"`{item['username']}`",
                 )
+                old_value = rank_order.get(old_key)
+                new_value = rank_order.get(new_key)
+                if old_value is not None and new_value is not None:
+                    direction = (
+                        "promoted" if new_value > old_value else "demoted"
+                    )
+                    player_update_lines.append(
+                        f"{display} has been **{direction}** to "
+                        f"**{str(new).title()}**!"
+                    )
+                else:
+                    player_update_lines.append(
+                        f"{display} is now **{str(new).title()}**!"
+                    )
 
         resistance_players.sort(key=lambda entry: entry[0])
         spy_players.sort(key=lambda entry: entry[0])
@@ -488,8 +532,77 @@ class ProAvalonRatingTracker:
                 inline=False,
             )
 
-        if rank_lines:
-            embed.add_field(name="Rank Changes", value="\n".join(rank_lines)[:1024], inline=False)
+        # Special award role ownership changes are produced by the same role
+        # reconciliation that just updated Discord, so the history and actual
+        # server roles stay in lock-step.
+        award_update_lines: list[str] = []
+        if role_sync_result is not None:
+            for transition in role_sync_result.award_transitions:
+                role_id = int(transition["role_id"])
+                previous_ids = {int(x) for x in transition["previous_user_ids"]}
+                new_ids = {int(x) for x in transition["new_user_ids"]}
+                if previous_ids == new_ids:
+                    continue
+
+                role_mention = f"<@&{role_id}>"
+                gained = sorted(new_ids - previous_ids)
+                lost = sorted(previous_ids - new_ids)
+                retained = sorted(new_ids & previous_ids)
+
+                def mentions(ids: list[int]) -> str:
+                    return ", ".join(f"<@{user_id}>" for user_id in ids)
+
+                if new_ids and not previous_ids:
+                    holders = mentions(sorted(new_ids))
+                    verb = "is" if len(new_ids) == 1 else "are"
+                    award_update_lines.append(
+                        f"{holders} {verb} now {role_mention}!"
+                    )
+                elif gained and lost:
+                    holders = mentions(sorted(new_ids))
+                    verb = "is" if len(new_ids) == 1 else "are"
+                    previous = mentions(lost)
+                    owner_label = (
+                        "Previous owner" if len(lost) == 1
+                        else "Previous owners"
+                    )
+                    award_update_lines.append(
+                        f"{holders} {verb} now {role_mention}! "
+                        f"**{owner_label}:** {previous}"
+                    )
+                elif gained:
+                    newcomers = mentions(gained)
+                    if retained:
+                        award_update_lines.append(
+                            f"{newcomers} has joined {mentions(retained)} "
+                            f"as {role_mention}!"
+                        )
+                    else:
+                        award_update_lines.append(
+                            f"{newcomers} is now {role_mention}!"
+                        )
+                elif lost and new_ids:
+                    holders = mentions(sorted(new_ids))
+                    award_update_lines.append(
+                        f"{holders} now holds {role_mention}. "
+                        f"**Previous co-holder(s):** {mentions(lost)}"
+                    )
+                elif lost and not new_ids:
+                    award_update_lines.append(
+                        f"{role_mention} is now vacant. "
+                        f"**Previous owner(s):** {mentions(lost)}"
+                    )
+
+        if player_update_lines or award_update_lines:
+            combined_updates = list(player_update_lines)
+            if player_update_lines and award_update_lines:
+                combined_updates.append("──────────")
+            combined_updates.extend(award_update_lines)
+            embed.add_field(
+                name="Player Updates",
+                value="\n".join(combined_updates)[:1024],
+                inline=False,
+            )
         if data.get("voteHistory") is None:
             embed.add_field(name="Voting History", value="Vote history was disabled for this match.", inline=False)
         embed.set_footer(text=f"Room {data.get('roomId')} • Automatically archived")

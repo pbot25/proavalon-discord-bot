@@ -67,6 +67,11 @@ class RoleSyncResult:
         self.profile_failures = 0
         self.errors: list[str] = []
         self.award_winners: dict[str, list[str]] = {}
+        # Every successful Discord role mutation performed by this sync.
+        # Used by /roles sync and automatic match-history updates.
+        self.changes: list[dict[str, object]] = []
+        # Award-holder set changes (including ties/transfers).
+        self.award_transitions: list[dict[str, object]] = []
 
 
 def normalize_bracket(value: str | None) -> str:
@@ -125,6 +130,12 @@ class DiscordRoleCommands(
         try:
             await member.remove_roles(role, reason="ProAvalon automatic role sync")
             result.removed += 1
+            result.changes.append({
+                "action": "removed",
+                "user_id": member.id,
+                "role_id": role.id,
+                "role_name": role.name,
+            })
         except (discord.Forbidden, discord.HTTPException) as error:
             result.errors.append(f"Could not remove {role.name}: {error}")
 
@@ -139,6 +150,12 @@ class DiscordRoleCommands(
         try:
             await member.add_roles(role, reason="ProAvalon automatic role sync")
             result.added += 1
+            result.changes.append({
+                "action": "added",
+                "user_id": member.id,
+                "role_id": role.id,
+                "role_name": role.name,
+            })
         except (discord.Forbidden, discord.HTTPException) as error:
             result.errors.append(f"Could not add {role.name}: {error}")
 
@@ -148,33 +165,57 @@ class DiscordRoleCommands(
         role_key: str,
         role: discord.Role | None,
         winners: list[tuple[int, str]],
+        linked_members: dict[int, discord.Member],
         result: RoleSyncResult,
     ) -> None:
-        """Synchronize one award role to every player tied for the lead."""
+        """Fully reconcile an award role to every current winner.
+
+        This intentionally does not trust only the assignment-tracking table.
+        If a role was left on someone by an older bug/manual edit, the sync
+        removes it from every known non-winner as well.
+        """
         desired_ids = {user_id for user_id, _ in winners}
-
         assignments = await get_award_assignments(guild.id, role_key)
+
+        # Build the real current-holder set from three sources:
+        # 1) tracked assignment rows, 2) every linked season member (which we
+        # explicitly fetched), and 3) Discord's cached role member list.
+        current_holders: dict[int, discord.Member | None] = {}
         for assignment in assignments:
-            assignment_key = str(assignment["assignment_key"])
             old_id = int(assignment["discord_user_id"])
-            old_role = guild.get_role(int(assignment["role_id"]))
+            current_holders[old_id] = linked_members.get(old_id)
 
-            if role is None or old_role != role or old_id not in desired_ids:
-                await self._remove_role_from_member(
-                    await fetch_member(guild, old_id),
-                    old_role,
-                    result,
-                )
+        if role is not None:
+            for user_id, member in linked_members.items():
+                if role in member.roles:
+                    current_holders[user_id] = member
+            for member in role.members:
+                current_holders[member.id] = member
 
-            # Rebuild tracking with one row per tied winner.
-            await clear_assignment(guild.id, assignment_key)
+        previous_ids = set(current_holders)
 
-        if role is None or not winners:
+        # Remove the configured award role from EVERY known holder who is no
+        # longer a winner, including stale holders not represented in DB rows.
+        if role is not None:
+            for user_id, member in list(current_holders.items()):
+                if user_id in desired_ids:
+                    continue
+                if member is None:
+                    member = await fetch_member(guild, user_id)
+                await self._remove_role_from_member(member, role, result)
+
+        # Rebuild assignment tracking from the actual desired winner set.
+        for assignment in assignments:
+            await clear_assignment(guild.id, str(assignment["assignment_key"]))
+
+        if role is None:
             return
 
         applied_names: list[str] = []
         for winner_id, winner_username in winners:
-            winner = await fetch_member(guild, winner_id)
+            winner = linked_members.get(winner_id)
+            if winner is None:
+                winner = await fetch_member(guild, winner_id)
             if winner is None:
                 continue
 
@@ -189,6 +230,14 @@ class DiscordRoleCommands(
 
         if applied_names:
             result.award_winners[role_key] = applied_names
+
+        if previous_ids != desired_ids:
+            result.award_transitions.append({
+                "role_key": role_key,
+                "role_id": role.id,
+                "previous_user_ids": sorted(previous_ids),
+                "new_user_ids": sorted(desired_ids),
+            })
 
     async def sync_guild(self, guild: discord.Guild) -> RoleSyncResult:
         result = RoleSyncResult()
@@ -221,6 +270,12 @@ class DiscordRoleCommands(
 
         usernames = [username for _, username in linked]
         ratings = await get_known_ratings(usernames)
+
+        linked_members: dict[int, discord.Member] = {}
+        for user_id, _ in linked:
+            member = await fetch_member(guild, user_id)
+            if member is not None:
+                linked_members[user_id] = member
         rank_role_ids = {
             key: configs[key]
             for key in RANK_KEYS
@@ -248,7 +303,7 @@ class DiscordRoleCommands(
 
         # Rank roles: exactly one configured rank role per linked player.
         for user_id, username in linked:
-            member = await fetch_member(guild, user_id)
+            member = linked_members.get(user_id)
             if member is None:
                 continue
 
@@ -386,6 +441,7 @@ class DiscordRoleCommands(
                     (int(winner["user_id"]), str(winner["username"]))
                     for winner in winners
                 ],
+                linked_members,
                 result,
             )
 
@@ -427,6 +483,7 @@ class DiscordRoleCommands(
                 role_key,
                 role,
                 [(winner[1], winner[2]) for winner in winners],
+                linked_members,
                 result,
             )
 
@@ -622,17 +679,70 @@ class DiscordRoleCommands(
             + ", ".join(f"`{username}`" for username in usernames)
             for key, usernames in result.award_winners.items()
         ]
-        text = (
-            f"Role sync complete for **{result.members} linked season player(s)**.\n"
-            f"Added: **{result.added}** • Removed: **{result.removed}**"
+
+        embed = discord.Embed(
+            title="ProAvalon Role Sync",
+            description=(
+                f"Checked **{result.members} linked season player(s)**.\n"
+                f"Added: **{result.added}** • Removed: **{result.removed}**"
+            ),
+            color=discord.Color.blurple(),
         )
-        if result.profile_failures:
-            text += f"\nProfile refresh failures: **{result.profile_failures}**"
+
+        def change_field(action: str, symbol: str) -> str | None:
+            matching = [
+                change for change in result.changes
+                if change["action"] == action
+            ]
+            if not matching:
+                return None
+            lines = [
+                f"{symbol} <@{change['user_id']}> — <@&{change['role_id']}>"
+                for change in matching
+            ]
+            value = "\n".join(lines)
+            if len(value) > 1024:
+                kept: list[str] = []
+                used = 0
+                for line in lines:
+                    if used + len(line) + 1 > 960:
+                        break
+                    kept.append(line)
+                    used += len(line) + 1
+                omitted = len(lines) - len(kept)
+                value = "\n".join(kept)
+                if omitted:
+                    value += f"\n… and {omitted} more."
+            return value
+
+        added_value = change_field("added", "➕")
+        removed_value = change_field("removed", "➖")
+        if added_value:
+            embed.add_field(name="Roles Added", value=added_value, inline=False)
+        if removed_value:
+            embed.add_field(name="Roles Removed", value=removed_value, inline=False)
         if award_lines:
-            text += "\n\n" + "\n".join(award_lines)
+            embed.add_field(
+                name="Current Special Role Holders",
+                value="\n".join(award_lines)[:1024],
+                inline=False,
+            )
+        if result.profile_failures:
+            embed.add_field(
+                name="Profile Refresh Warnings",
+                value=f"{result.profile_failures} profile(s) could not be refreshed.",
+                inline=False,
+            )
         if result.errors:
-            text += "\n\n⚠️ " + "\n⚠️ ".join(result.errors[:8])
-        await interaction.followup.send(text, ephemeral=True)
+            embed.add_field(
+                name="Warnings",
+                value="\n".join(f"⚠️ {error}" for error in result.errors[:8])[:1024],
+                inline=False,
+            )
+        if not result.changes:
+            embed.set_footer(text="No Discord roles needed to change.")
+
+        await interaction.followup.send(embed=embed, ephemeral=True)
 
 
 async def setup(bot: commands.Bot) -> None:
