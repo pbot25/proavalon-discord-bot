@@ -41,6 +41,36 @@ def _center_text(
     draw.text((x, y), text, fill=fill, font=font)
 
 
+def _draw_green_check(
+    draw: ImageDraw.ImageDraw,
+    box: tuple[int, int, int, int],
+    font,
+) -> None:
+    """Draw an emoji-style green check without relying on emoji fonts."""
+    left, top, right, bottom = box
+    size = min(24, right - left - 10, bottom - top - 10)
+    check_left = left + ((right - left) - size) / 2
+    check_top = top + ((bottom - top) - size) / 2
+    check_box = (
+        check_left,
+        check_top,
+        check_left + size,
+        check_top + size,
+    )
+    draw.rounded_rectangle(
+        check_box,
+        radius=4,
+        fill="#20a447",
+    )
+    _center_text(
+        draw,
+        check_box,
+        "✓",
+        font=font,
+        fill="white",
+    )
+
+
 def build_vote_history_png(game_data: dict) -> bytes | None:
     """Render ProAvalon's voteHistory[player][mission][pick] as a PNG."""
     history = game_data.get("voteHistory")
@@ -68,18 +98,15 @@ def build_vote_history_png(game_data: dict) -> bytes | None:
     mission_header_height = 34
     pick_header_height = 30
     header_height = mission_header_height + pick_header_height
-    legend_height = 46
-
     width = name_width + cell_width * len(columns) + 2
-    height = header_height + row_height * len(ordered) + legend_height
+    height = header_height + row_height * len(ordered) + 2
 
     image = Image.new("RGB", (width, height), "white")
     draw = ImageDraw.Draw(image)
     player_font = _font(15)
     header_font = _font(15, True)
     pick_font = _font(12, True)
-    check_font = _font(22, True)
-    legend_font = _font(12)
+    check_font = _font(18, True)
 
     mission_history = game_data.get("missionHistory") or []
 
@@ -170,12 +197,10 @@ def build_vote_history_png(game_data: dict) -> bytes | None:
                 cell_box, fill=cell_fill, outline="#8a8a8a", width=1
             )
 
-            # Color already communicates vote. Only show a check when the
-            # player was on the proposed mission team.
+            # Color already communicates the vote. The proposed mission
+            # team is marked with a green emoji-style check.
             if "VHpicked" in token:
-                _center_text(
-                    draw, cell_box, "✓", font=check_font, fill="#111111"
-                )
+                _draw_green_check(draw, cell_box, check_font)
 
             if "VHleader" in token:
                 draw.rectangle(
@@ -189,17 +214,6 @@ def build_vote_history_png(game_data: dict) -> bytes | None:
                     width=3,
                 )
             x += cell_width
-
-    legend_y = header_height + len(ordered) * row_height + 12
-    draw.text(
-        (8, legend_y),
-        (
-            "Green = Approve   Red = Reject   "
-            "✓ = Proposed team   Thick border = Leader"
-        ),
-        fill="#333333",
-        font=legend_font,
-    )
 
     output = BytesIO()
     image.save(output, format="PNG", optimize=True)

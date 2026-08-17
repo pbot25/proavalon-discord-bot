@@ -1,0 +1,600 @@
+from __future__ import annotations
+
+import asyncio
+
+import discord
+from discord import app_commands
+from discord.ext import commands, tasks
+
+from commands.leaderboard import get_metric_record
+from database.discord_roles import (
+    ALL_ROLE_KEYS,
+    AWARD_KEYS,
+    RANK_KEYS,
+    clear_assignment,
+    clear_role_config,
+    get_active_season_linked_users,
+    get_assignment,
+    get_award_minimum_games,
+    get_known_ratings,
+    get_rank_assignments,
+    get_role_configs,
+    set_assignment,
+    set_award_minimum_games,
+    set_role_config,
+)
+from database.seasons import get_active_season
+from proavalon.profile_scraper import (
+    ProAvalonError,
+    ProAvalonLoginError,
+    ProAvalonUserNotFound,
+)
+from utils.permissions import bot_admin_only
+
+
+ROLE_TARGET_NAMES = {
+    "rank_unranked": "Unranked",
+    "rank_iron": "Iron",
+    "rank_bronze": "Bronze",
+    "rank_silver": "Silver",
+    "rank_gold": "Gold",
+    "rank_platinum": "Platinum",
+    "rank_diamond": "Diamond",
+    "rank_champion": "Champion",
+    "award_best_resistance": "Best Resistance WR",
+    "award_best_spy": "Best Spy WR",
+    "award_highest_rating": "Highest Rating",
+    "award_lowest_rating": "Lowest Rating",
+}
+
+ROLE_TARGET_CHOICES = [
+    app_commands.Choice(name=ROLE_TARGET_NAMES[key], value=key)
+    for key in ALL_ROLE_KEYS
+]
+
+VALID_BRACKETS = {
+    "unranked", "iron", "bronze", "silver", "gold",
+    "platinum", "diamond", "champion",
+}
+
+
+class RoleSyncResult:
+    def __init__(self) -> None:
+        self.added = 0
+        self.removed = 0
+        self.members = 0
+        self.profile_failures = 0
+        self.errors: list[str] = []
+        self.award_winners: dict[str, str] = {}
+
+
+def normalize_bracket(value: str | None) -> str:
+    if not value:
+        return "unranked"
+    normalized = str(value).strip().casefold()
+    return normalized if normalized in VALID_BRACKETS else "unranked"
+
+
+async def fetch_member(guild: discord.Guild, user_id: int):
+    member = guild.get_member(user_id)
+    if member is not None:
+        return member
+    try:
+        return await guild.fetch_member(user_id)
+    except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+        return None
+
+
+def manageable_role(guild: discord.Guild, role_id: int) -> discord.Role | None:
+    role = guild.get_role(role_id)
+    if role is None or role.is_default() or role.managed:
+        return None
+    me = guild.me
+    if me is None or role.position >= me.top_role.position:
+        return None
+    return role
+
+
+class DiscordRoleCommands(
+    commands.GroupCog,
+    group_name="roles",
+    group_description="Configure automatic ProAvalon Discord roles.",
+):
+    def __init__(self, bot: commands.Bot) -> None:
+        self.bot = bot
+        self.auto_sync.start()
+
+    def cog_unload(self) -> None:
+        self.auto_sync.cancel()
+
+    async def _profile(self, username: str):
+        return await self.bot.profile_cache.get_or_fetch(
+            username,
+            self.bot.proavalon_scraper.get_profile_data,
+        )
+
+    async def _remove_role_from_member(
+        self,
+        member: discord.Member | None,
+        role: discord.Role | None,
+        result: RoleSyncResult,
+    ) -> None:
+        if member is None or role is None or role not in member.roles:
+            return
+        try:
+            await member.remove_roles(role, reason="ProAvalon automatic role sync")
+            result.removed += 1
+        except (discord.Forbidden, discord.HTTPException) as error:
+            result.errors.append(f"Could not remove {role.name}: {error}")
+
+    async def _add_role_to_member(
+        self,
+        member: discord.Member | None,
+        role: discord.Role | None,
+        result: RoleSyncResult,
+    ) -> None:
+        if member is None or role is None or role in member.roles:
+            return
+        try:
+            await member.add_roles(role, reason="ProAvalon automatic role sync")
+            result.added += 1
+        except (discord.Forbidden, discord.HTTPException) as error:
+            result.errors.append(f"Could not add {role.name}: {error}")
+
+    async def _set_award_holder(
+        self,
+        guild: discord.Guild,
+        role_key: str,
+        role: discord.Role | None,
+        winner_id: int | None,
+        winner_username: str | None,
+        result: RoleSyncResult,
+    ) -> None:
+        assignment = await get_assignment(guild.id, role_key)
+        if assignment is not None:
+            old_id = int(assignment["discord_user_id"])
+            old_role = guild.get_role(int(assignment["role_id"]))
+            if winner_id != old_id or role is None or old_role != role:
+                await self._remove_role_from_member(
+                    await fetch_member(guild, old_id),
+                    old_role,
+                    result,
+                )
+                await clear_assignment(guild.id, role_key)
+
+        if role is None or winner_id is None:
+            return
+
+        winner = await fetch_member(guild, winner_id)
+        if winner is None:
+            return
+
+        await self._add_role_to_member(winner, role, result)
+        await set_assignment(guild.id, role_key, winner_id, role.id)
+        if winner_username:
+            result.award_winners[role_key] = winner_username
+
+    async def sync_guild(self, guild: discord.Guild) -> RoleSyncResult:
+        result = RoleSyncResult()
+        configs = await get_role_configs(guild.id)
+        if not configs:
+            return result
+
+        me = guild.me
+        if me is None or not me.guild_permissions.manage_roles:
+            result.errors.append(
+                "The bot does not have Discord's Manage Roles permission."
+            )
+            return result
+
+        season = await get_active_season(guild.id)
+        if season is None:
+            result.errors.append("No active community season.")
+            return result
+
+        links = await get_active_season_linked_users(
+            guild.id,
+            int(season["season_number"]),
+        )
+        linked = [
+            (int(row["discord_user_id"]), str(row["proavalon_username"]))
+            for row in links
+            if row["discord_user_id"] is not None
+        ]
+        result.members = len(linked)
+
+        usernames = [username for _, username in linked]
+        ratings = await get_known_ratings(usernames)
+        rank_role_ids = {
+            key: configs[key]
+            for key in RANK_KEYS
+            if key in configs
+        }
+        configured_rank_roles = {
+            rid: manageable_role(guild, rid)
+            for rid in rank_role_ids.values()
+        }
+
+        # Clean rank assignments for people no longer linked to this season.
+        current_ids = {user_id for user_id, _ in linked}
+        for assignment in await get_rank_assignments(guild.id):
+            assignment_key = str(assignment["assignment_key"])
+            old_user_id = int(assignment["discord_user_id"])
+            if old_user_id in current_ids:
+                continue
+            old_role = guild.get_role(int(assignment["role_id"]))
+            await self._remove_role_from_member(
+                await fetch_member(guild, old_user_id), old_role, result
+            )
+            await clear_assignment(guild.id, assignment_key)
+
+        profiles: dict[str, object] = {}
+
+        # Rank roles: exactly one configured rank role per linked player.
+        for user_id, username in linked:
+            member = await fetch_member(guild, user_id)
+            if member is None:
+                continue
+
+            rating_data = ratings.get(username.casefold())
+            if rating_data is not None:
+                bracket = normalize_bracket(rating_data[1])
+            else:
+                try:
+                    profile, _ = await self._profile(username)
+                    profiles[username.casefold()] = profile
+                    bracket = normalize_bracket(
+                        getattr(profile, "rating_bracket", None)
+                    )
+                except (
+                    ProAvalonUserNotFound,
+                    ProAvalonLoginError,
+                    ProAvalonError,
+                    asyncio.TimeoutError,
+                    ValueError,
+                ):
+                    result.profile_failures += 1
+                    bracket = "unranked"
+
+            desired_key = f"rank_{bracket}"
+            desired_role_id = configs.get(desired_key)
+            desired_role = (
+                manageable_role(guild, desired_role_id)
+                if desired_role_id is not None
+                else None
+            )
+
+            # Remove any other configured rank roles currently on this member.
+            for role_id, role in configured_rank_roles.items():
+                if role is not None and role != desired_role and role in member.roles:
+                    await self._remove_role_from_member(member, role, result)
+
+            assignment_key = f"rank:{user_id}"
+            previous = await get_assignment(guild.id, assignment_key)
+            if previous is not None:
+                previous_role_id = int(previous["role_id"])
+                if desired_role is None or previous_role_id != desired_role.id:
+                    previous_role = guild.get_role(previous_role_id)
+                    await self._remove_role_from_member(member, previous_role, result)
+                    await clear_assignment(guild.id, assignment_key)
+
+            if desired_role is not None:
+                await self._add_role_to_member(member, desired_role, result)
+                await set_assignment(
+                    guild.id, assignment_key, user_id, desired_role.id
+                )
+
+        needs_alignment_awards = any(
+            key in configs
+            for key in ("award_best_resistance", "award_best_spy")
+        )
+
+        if needs_alignment_awards:
+            for _, username in linked:
+                key = username.casefold()
+                if key in profiles:
+                    continue
+                try:
+                    profile, _ = await self._profile(username)
+                    profiles[key] = profile
+                except (
+                    ProAvalonUserNotFound,
+                    ProAvalonLoginError,
+                    ProAvalonError,
+                    asyncio.TimeoutError,
+                    ValueError,
+                ):
+                    result.profile_failures += 1
+
+        minimum_games = await get_award_minimum_games(guild.id)
+        game_size_key = f"{int(season['tracked_player_count'])}p"
+
+        # Build candidate records once.
+        candidate_by_username: dict[str, dict] = {}
+        for user_id, username in linked:
+            profile = profiles.get(username.casefold())
+            if profile is None:
+                continue
+            res_w, res_l = get_metric_record(profile, game_size_key, "resistance")
+            spy_w, spy_l = get_metric_record(profile, game_size_key, "spy")
+            rating_data = ratings.get(username.casefold())
+            rating = rating_data[0] if rating_data is not None else -1
+            candidate_by_username[username.casefold()] = {
+                "user_id": user_id,
+                "username": username,
+                "res_games": res_w + res_l,
+                "res_wr": (res_w / (res_w + res_l) * 100) if res_w + res_l else 0.0,
+                "spy_games": spy_w + spy_l,
+                "spy_wr": (spy_w / (spy_w + spy_l) * 100) if spy_w + spy_l else 0.0,
+                "rating": rating,
+            }
+
+        def best_alignment(metric: str):
+            games_key = f"{metric}_games"
+            wr_key = f"{metric}_wr"
+            eligible = [
+                item
+                for item in candidate_by_username.values()
+                if item[games_key] >= minimum_games
+            ]
+            if not eligible:
+                return None
+            return max(
+                eligible,
+                key=lambda item: (
+                    item[wr_key],
+                    item[games_key],
+                    item["rating"],
+                    item["username"].casefold(),
+                ),
+            )
+
+        best_res = best_alignment("res")
+        best_spy = best_alignment("spy")
+
+        for role_key, winner in (
+            ("award_best_resistance", best_res),
+            ("award_best_spy", best_spy),
+        ):
+            role_id = configs.get(role_key)
+            role = manageable_role(guild, role_id) if role_id else None
+            await self._set_award_holder(
+                guild,
+                role_key,
+                role,
+                winner["user_id"] if winner else None,
+                winner["username"] if winner else None,
+                result,
+            )
+
+        rated_candidates = []
+        for user_id, username in linked:
+            rating_data = ratings.get(username.casefold())
+            if rating_data is not None:
+                rated_candidates.append(
+                    (int(rating_data[0]), user_id, username)
+                )
+
+        highest = max(rated_candidates, default=None)
+        lowest = min(rated_candidates, default=None)
+        for role_key, winner in (
+            ("award_highest_rating", highest),
+            ("award_lowest_rating", lowest),
+        ):
+            role_id = configs.get(role_key)
+            role = manageable_role(guild, role_id) if role_id else None
+            await self._set_award_holder(
+                guild,
+                role_key,
+                role,
+                winner[1] if winner else None,
+                winner[2] if winner else None,
+                result,
+            )
+
+        # Flag configured roles the bot cannot manage.
+        for key, role_id in configs.items():
+            if manageable_role(guild, role_id) is None:
+                role = guild.get_role(role_id)
+                role_name = role.name if role is not None else f"ID {role_id}"
+                result.errors.append(
+                    f"Cannot manage configured role {role_name} ({ROLE_TARGET_NAMES.get(key, key)})."
+                )
+
+        return result
+
+    @tasks.loop(minutes=15)
+    async def auto_sync(self) -> None:
+        for guild in self.bot.guilds:
+            try:
+                result = await self.sync_guild(guild)
+                if result.errors:
+                    print(
+                        f"Discord role sync warnings for guild {guild.id}: "
+                        + " | ".join(result.errors)
+                    )
+            except Exception as error:
+                print(
+                    f"Discord role sync failed for guild {guild.id}: "
+                    f"{type(error).__name__}: {error}"
+                )
+
+    @auto_sync.before_loop
+    async def before_auto_sync(self) -> None:
+        await self.bot.wait_until_ready()
+        await asyncio.sleep(10)
+
+    @app_commands.command(
+        name="set",
+        description="Assigns a Discord role to a ProAvalon rank or season award.",
+    )
+    @app_commands.describe(
+        target="Rank/award this Discord role represents.",
+        role="Discord role the bot should manage.",
+    )
+    @app_commands.choices(target=ROLE_TARGET_CHOICES)
+    @bot_admin_only()
+    async def set_role(
+        self,
+        interaction: discord.Interaction,
+        target: app_commands.Choice[str],
+        role: discord.Role,
+    ) -> None:
+        if interaction.guild is None:
+            await interaction.response.send_message(
+                "This command can only be used in a server.", ephemeral=True
+            )
+            return
+
+        me = interaction.guild.me
+        if me is None or not me.guild_permissions.manage_roles:
+            await interaction.response.send_message(
+                "Give the bot the **Manage Roles** permission first.",
+                ephemeral=True,
+            )
+            return
+        if role.is_default() or role.managed:
+            await interaction.response.send_message(
+                "That role cannot be managed by the bot.", ephemeral=True
+            )
+            return
+        if role.position >= me.top_role.position:
+            await interaction.response.send_message(
+                "Move the bot's Discord role **above** that role in the server role list first.",
+                ephemeral=True,
+            )
+            return
+
+        try:
+            await set_role_config(interaction.guild.id, target.value, role.id)
+        except ValueError as error:
+            await interaction.response.send_message(str(error), ephemeral=True)
+            return
+
+        await interaction.response.send_message(
+            f"{role.mention} is now the **{target.name}** role. "
+            "Use `/roles sync` to apply it immediately.",
+            ephemeral=True,
+        )
+
+    @app_commands.command(
+        name="clear",
+        description="Stops managing one configured rank/award role.",
+    )
+    @app_commands.choices(target=ROLE_TARGET_CHOICES)
+    @bot_admin_only()
+    async def clear_role(
+        self,
+        interaction: discord.Interaction,
+        target: app_commands.Choice[str],
+    ) -> None:
+        if interaction.guild_id is None:
+            await interaction.response.send_message(
+                "This command can only be used in a server.", ephemeral=True
+            )
+            return
+        removed = await clear_role_config(interaction.guild_id, target.value)
+        await interaction.response.send_message(
+            (
+                f"Cleared the **{target.name}** role configuration."
+                if removed is not None
+                else f"No role was configured for **{target.name}**."
+            ),
+            ephemeral=True,
+        )
+
+    @app_commands.command(
+        name="minimum-games",
+        description="Sets the GP requirement for Best Resistance/Spy WR roles.",
+    )
+    @bot_admin_only()
+    async def minimum_games(
+        self,
+        interaction: discord.Interaction,
+        games: app_commands.Range[int, 1, 999] = 5,
+    ) -> None:
+        if interaction.guild_id is None:
+            await interaction.response.send_message(
+                "This command can only be used in a server.", ephemeral=True
+            )
+            return
+        await set_award_minimum_games(interaction.guild_id, games)
+        await interaction.response.send_message(
+            f"Best Resistance/Spy roles now require at least **{games} games**.",
+            ephemeral=True,
+        )
+
+    @app_commands.command(
+        name="info",
+        description="Shows this server's automatic ProAvalon role configuration.",
+    )
+    @bot_admin_only()
+    async def info(self, interaction: discord.Interaction) -> None:
+        if interaction.guild is None:
+            await interaction.response.send_message(
+                "This command can only be used in a server.", ephemeral=True
+            )
+            return
+        configs = await get_role_configs(interaction.guild.id)
+        minimum_games = await get_award_minimum_games(interaction.guild.id)
+        embed = discord.Embed(
+            title="Automatic ProAvalon Roles",
+            description=(
+                "Linked accounts are synchronized every **15 minutes**.\n"
+                f"Best Res/Spy minimum games: **{minimum_games}**"
+            ),
+            color=discord.Color.blurple(),
+        )
+        rank_lines = []
+        for key in RANK_KEYS:
+            role_id = configs.get(key)
+            rank_lines.append(
+                f"**{ROLE_TARGET_NAMES[key]}:** "
+                + (f"<@&{role_id}>" if role_id else "Not configured")
+            )
+        award_lines = []
+        for key in AWARD_KEYS:
+            role_id = configs.get(key)
+            award_lines.append(
+                f"**{ROLE_TARGET_NAMES[key]}:** "
+                + (f"<@&{role_id}>" if role_id else "Not configured")
+            )
+        embed.add_field(name="Rank Roles", value="\n".join(rank_lines), inline=False)
+        embed.add_field(name="Season Award Roles", value="\n".join(award_lines), inline=False)
+        embed.set_footer(
+            text="The bot needs Manage Roles and must sit above every managed role."
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @app_commands.command(
+        name="sync",
+        description="Immediately refreshes all configured ProAvalon Discord roles.",
+    )
+    @bot_admin_only()
+    async def sync(self, interaction: discord.Interaction) -> None:
+        if interaction.guild is None:
+            await interaction.response.send_message(
+                "This command can only be used in a server.", ephemeral=True
+            )
+            return
+        await interaction.response.defer(thinking=True, ephemeral=True)
+        result = await self.sync_guild(interaction.guild)
+        award_lines = [
+            f"**{ROLE_TARGET_NAMES[key]}:** `{username}`"
+            for key, username in result.award_winners.items()
+        ]
+        text = (
+            f"Role sync complete for **{result.members} linked season player(s)**.\n"
+            f"Added: **{result.added}** • Removed: **{result.removed}**"
+        )
+        if result.profile_failures:
+            text += f"\nProfile refresh failures: **{result.profile_failures}**"
+        if award_lines:
+            text += "\n\n" + "\n".join(award_lines)
+        if result.errors:
+            text += "\n\n⚠️ " + "\n⚠️ ".join(result.errors[:8])
+        await interaction.followup.send(text, ephemeral=True)
+
+
+async def setup(bot: commands.Bot) -> None:
+    await bot.add_cog(DiscordRoleCommands(bot))

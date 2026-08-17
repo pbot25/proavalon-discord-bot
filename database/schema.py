@@ -273,4 +273,35 @@ ON daily_leaderboard_channels (guild_id, channel_id);
 CREATE INDEX IF NOT EXISTS daily_leaderboard_channels_enabled
 ON daily_leaderboard_channels (enabled, guild_id);
 
+
+
+CREATE TABLE IF NOT EXISTS discord_role_configs (
+    guild_id TEXT NOT NULL,
+    role_key TEXT NOT NULL,
+    role_id TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (guild_id, role_key)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS one_discord_role_config_per_role
+ON discord_role_configs (guild_id, role_id);
+
+CREATE TABLE IF NOT EXISTS discord_role_settings (
+    guild_id TEXT PRIMARY KEY,
+    award_minimum_games INTEGER NOT NULL DEFAULT 5,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS discord_role_assignments (
+    guild_id TEXT NOT NULL,
+    assignment_key TEXT NOT NULL,
+    discord_user_id TEXT NOT NULL,
+    role_id TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (guild_id, assignment_key)
+);
+
+CREATE INDEX IF NOT EXISTS discord_role_assignments_by_user
+ON discord_role_assignments (guild_id, discord_user_id);
+
 """

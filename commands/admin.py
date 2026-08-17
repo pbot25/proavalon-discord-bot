@@ -133,6 +133,7 @@ def build_command_pages(bot: commands.Bot):
         "Leaderboard",
         "Season",
         "Group",
+        "Roles",
         "Admin",
         "Set",
     ]

@@ -75,6 +75,7 @@ class ProAvalonBot(commands.Bot):
         await self.load_extension("commands.leaderboard")
         await self.load_extension("commands.group")
         await self.load_extension("commands.insights")
+        await self.load_extension("commands.roles")
 
         synced_commands = await self.tree.sync()
 
