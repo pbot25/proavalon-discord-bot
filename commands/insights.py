@@ -5,7 +5,7 @@ import json
 import discord
 from discord import app_commands
 from discord.ext import commands
-from database.insights import active_or_latest,season_rows,recent_rows,find_match,registered_usernames,all_links_for_discord,bot_status_data,unpack,player_summary,streak_summary,role_summary,alignment_summary,role_board,activity_summary,relationships,season_records,ratings_for_usernames
+from database.insights import active_or_latest,season_rows,recent_rows,find_match,registered_usernames,all_links_for_discord,bot_status_data,unpack,player_summary,streak_summary,role_summary,alignment_summary,role_board,activity_summary,season_records,ratings_for_usernames
 from utils.permissions import bot_admin_only
 from utils.discord_users import parse_discord_user_id
 
@@ -156,20 +156,6 @@ class Insights(commands.Cog):
         if not x: return await interaction.response.send_message('No data found.',ephemeral=True)
         wr=x['wins']/x['games']*100 if x['games'] else 0
         await interaction.response.send_message(embed=discord.Embed(title=f'{u} — Activity',description=f"Last {days} days: **{x['games']} games** • **{wr:.1f}% WR**\nBusiest day: **{x['busiest_day'] or 'N/A'}** ({x['busiest_count']} games)\nLast tracked game: **{fmt_date(x['last'])}**",color=discord.Color.blurple()))
-
-    @app_commands.command(name='rivals',description='Shows players most often opposite your alignment.')
-    @app_commands.autocomplete(username=player_auto)
-    async def rivals(self,interaction:discord.Interaction,username:str,minimum_shared_games:app_commands.Range[int,1,999]=5):
-        s,u=await resolve_name(interaction,username); data=relationships(await season_rows(s['id']),u) if s else []; data=[x for x in data if x['shared']>=minimum_shared_games]; data.sort(key=lambda x:(-x['opp_pct'],-x['shared']))
-        lines=[f"{i}. `{x['username']}` — **{x['opp_pct']:.1f}%** opposite ({x['opp']}/{x['shared']}) • H2H {x['opp_wins']}-{x['opp_losses']}" for i,x in enumerate(data[:10],1)]
-        await interaction.response.send_message(embed=discord.Embed(title=f'{u} — Rivals',description='\n'.join(lines) or 'Not enough tracked games yet.',color=discord.Color.blurple()))
-
-    @app_commands.command(name='teammates',description='Shows players most often on your alignment.')
-    @app_commands.autocomplete(username=player_auto)
-    async def teammates(self,interaction:discord.Interaction,username:str,minimum_shared_games:app_commands.Range[int,1,999]=5):
-        s,u=await resolve_name(interaction,username); data=relationships(await season_rows(s['id']),u) if s else []; data=[x for x in data if x['shared']>=minimum_shared_games]; data.sort(key=lambda x:(-x['same_pct'],-x['shared']))
-        lines=[f"{i}. `{x['username']}` — **{x['same_pct']:.1f}%** same ({x['same']}/{x['shared']})" for i,x in enumerate(data[:10],1)]
-        await interaction.response.send_message(embed=discord.Embed(title=f'{u} — Teammates',description='\n'.join(lines) or 'Not enough tracked games yet.',color=discord.Color.blurple()))
 
     @app_commands.command(name='player-history',description='Shows remembered accounts and archived results across seasons.')
     async def player_history(self,interaction:discord.Interaction,discord_user:discord.Member|None=None,discord_user_id:str|None=None):

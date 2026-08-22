@@ -177,6 +177,15 @@ class DiscordRoleCommands(
         desired_ids = {user_id for user_id, _ in winners}
         assignments = await get_award_assignments(guild.id, role_key)
 
+        # Assignment rows are the canonical previous winner set for
+        # announcements. Discord's member/role cache is also scanned below for
+        # cleanup, but stale Discord state must not cause the same title
+        # transfer to be announced again on a later match.
+        tracked_previous_ids = {
+            int(assignment["discord_user_id"])
+            for assignment in assignments
+        }
+
         # Build the real current-holder set from three sources:
         # 1) tracked assignment rows, 2) every linked season member (which we
         # explicitly fetched), and 3) Discord's cached role member list.
@@ -191,8 +200,6 @@ class DiscordRoleCommands(
                     current_holders[user_id] = member
             for member in role.members:
                 current_holders[member.id] = member
-
-        previous_ids = set(current_holders)
 
         # Remove the configured award role from EVERY known holder who is no
         # longer a winner, including stale holders not represented in DB rows.
@@ -231,11 +238,11 @@ class DiscordRoleCommands(
         if applied_names:
             result.award_winners[role_key] = applied_names
 
-        if previous_ids != desired_ids:
+        if tracked_previous_ids != desired_ids:
             result.award_transitions.append({
                 "role_key": role_key,
                 "role_id": role.id,
-                "previous_user_ids": sorted(previous_ids),
+                "previous_user_ids": sorted(tracked_previous_ids),
                 "new_user_ids": sorted(desired_ids),
             })
 
@@ -286,8 +293,18 @@ class DiscordRoleCommands(
             for rid in rank_role_ids.values()
         }
 
-        # Clean rank assignments for people no longer linked to this season.
+        # Clean bot-managed rank roles from anyone who is no longer linked to
+        # this active season. This is intentionally authoritative: once a role
+        # is configured as a ProAvalon rank role, the bot owns its membership.
         current_ids = {user_id for user_id, _ in linked}
+        for role in configured_rank_roles.values():
+            if role is None:
+                continue
+            for member in list(role.members):
+                if member.id not in current_ids:
+                    await self._remove_role_from_member(member, role, result)
+
+        # Clean rank assignment rows for people no longer linked to this season.
         for assignment in await get_rank_assignments(guild.id):
             assignment_key = str(assignment["assignment_key"])
             old_user_id = int(assignment["discord_user_id"])

@@ -43,6 +43,22 @@ RATING_BRACKET_EMOJIS = {
 }
 
 
+SOCIAL_LIST_CHOICES = [
+    app_commands.Choice(
+        name="Most Played With",
+        value="most-played-with",
+    ),
+    app_commands.Choice(
+        name="Teammates",
+        value="teammates",
+    ),
+    app_commands.Choice(
+        name="Rivals",
+        value="rivals",
+    ),
+]
+
+
 def get_rating_bracket_emoji(
     rating_bracket: str | None,
 ) -> str:
@@ -1521,6 +1537,193 @@ class StatsCommands(
                 ),
             )
         )
+
+
+    @app_commands.command(
+        name="list",
+        description="Lists most-played-with players, teammates, or rivals.",
+    )
+    @app_commands.describe(
+        category="Which relationship list to show.",
+        username=(
+            "Registered season player. Leave blank to use your linked "
+            "active-season account."
+        ),
+        minimum_games=(
+            "Minimum games together/opposite required to appear. Defaults to 1."
+        ),
+    )
+    @app_commands.choices(category=SOCIAL_LIST_CHOICES)
+    @app_commands.autocomplete(username=registered_username_autocomplete)
+    async def relationship_list(
+        self,
+        interaction: discord.Interaction,
+        category: app_commands.Choice[str],
+        username: str | None = None,
+        minimum_games: app_commands.Range[int, 1, 999] = 1,
+    ) -> None:
+        if interaction.guild_id is None:
+            await interaction.response.send_message(
+                "This command can only be used in a server.",
+                ephemeral=True,
+            )
+            return
+
+        season = await get_active_season(interaction.guild_id)
+        if season is None:
+            await interaction.response.send_message(
+                "No community season is currently active.",
+                ephemeral=True,
+            )
+            return
+
+        if username is not None and username.strip():
+            requested = username.strip()
+        else:
+            link = await get_preferred_link_for_discord(
+                interaction.guild_id,
+                interaction.user.id,
+                int(season["season_number"]),
+            )
+            if link is None:
+                await interaction.response.send_message(
+                    (
+                        "You do not have an account linked for the active "
+                        "season. Provide `username` or use `/account link`."
+                    ),
+                    ephemeral=True,
+                )
+                return
+            requested = str(link["proavalon_username"])
+
+        resolved = await resolve_registered_username(
+            season_id=int(season["id"]),
+            requested_username=requested,
+        )
+        if resolved is None:
+            await interaction.response.send_message(
+                (
+                    f"`{requested}` is not registered for Community Season "
+                    f"{season['season_number']}."
+                ),
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer(thinking=True)
+
+        matches = await get_season_matches(int(season["id"]))
+        social = build_player_social_stats(
+            matches,
+            resolved,
+            minimum_shared_games=1,
+        )
+        if social is None:
+            await interaction.followup.send(
+                (
+                    f"No archived match history has been recorded yet for "
+                    f"`{resolved}`."
+                ),
+                ephemeral=True,
+            )
+            return
+
+        relationships = list(social["relationships"])
+        minimum = int(minimum_games)
+
+        if category.value == "most-played-with":
+            relationships = [
+                row
+                for row in relationships
+                if int(row["shared_games"]) >= minimum
+            ]
+            relationships.sort(
+                key=lambda row: (
+                    -int(row["shared_games"]),
+                    -int(row["same_games"]),
+                    str(row["username"]).casefold(),
+                )
+            )
+            title = f"{resolved} — Most Played With"
+            lines = [
+                (
+                    f"**{index}.** `{row['username']}` — "
+                    f"**{int(row['shared_games'])} shared game(s)** "
+                    f"• {int(row['same_games'])} same "
+                    f"• {int(row['opposite_games'])} opposite"
+                )
+                for index, row in enumerate(relationships[:10], start=1)
+            ]
+
+        elif category.value == "teammates":
+            relationships = [
+                row
+                for row in relationships
+                if int(row["same_games"]) >= minimum
+            ]
+            relationships.sort(
+                key=lambda row: (
+                    -int(row["same_games"]),
+                    -float(row["same_win_rate"]),
+                    -int(row["shared_games"]),
+                    str(row["username"]).casefold(),
+                )
+            )
+            title = f"{resolved} — Teammates"
+            lines = [
+                (
+                    f"**{index}.** `{row['username']}` — "
+                    f"**{int(row['same_games'])} game(s) together** "
+                    f"• {float(row['same_win_rate']):.1f}% WR "
+                    f"• {int(row['shared_games'])} total shared"
+                )
+                for index, row in enumerate(relationships[:10], start=1)
+            ]
+
+        else:
+            relationships = [
+                row
+                for row in relationships
+                if int(row["opposite_games"]) >= minimum
+            ]
+            relationships.sort(
+                key=lambda row: (
+                    -int(row["opposite_games"]),
+                    -int(row["opponent_wins"]) - int(row["opponent_losses"]),
+                    str(row["username"]).casefold(),
+                )
+            )
+            title = f"{resolved} — Rivals"
+            lines = [
+                (
+                    f"**{index}.** `{row['username']}` — "
+                    f"**{int(row['opposite_games'])} game(s) opposite** "
+                    f"• H2H {int(row['opponent_wins'])}-"
+                    f"{int(row['opponent_losses'])} "
+                    f"• {float(row['opponent_win_rate']):.1f}% WR"
+                )
+                for index, row in enumerate(relationships[:10], start=1)
+            ]
+
+        embed = discord.Embed(
+            title=title,
+            description=(
+                "\n".join(lines)
+                if lines
+                else (
+                    "No players meet the current minimum-games "
+                    "requirement yet."
+                )
+            ),
+            color=discord.Color.blurple(),
+        )
+        embed.set_footer(
+            text=(
+                f"Community Season {season['season_number']} • "
+                f"Minimum: {minimum} game(s) • Top 10"
+            )
+        )
+        await interaction.followup.send(embed=embed)
 
 
     @app_commands.command(

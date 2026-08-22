@@ -36,6 +36,74 @@ async def save_match(*, season_id:int, fingerprint:str, room_id:int, detected_at
         await db.commit(); return c.rowcount>0
     finally: await db.close()
 
+
+async def get_previous_player_brackets(
+    season_id: int,
+    current_fingerprint: str,
+    usernames: list[str],
+) -> dict[str, str]:
+    """
+    Return each player's most recently archived rating bracket before the
+    current match.
+
+    Match-history announcements use this instead of trusting only the live
+    pre-game snapshot. That prevents an old promotion/demotion from being
+    announced again if ProAvalon's live rating feed was briefly stale.
+    """
+    targets = {
+        username.strip().casefold()
+        for username in usernames
+        if isinstance(username, str) and username.strip()
+    }
+    if not targets:
+        return {}
+
+    db = await connect()
+    try:
+        cursor = await db.execute(
+            """
+            SELECT rating_changes_json
+            FROM season_matches
+            WHERE community_season_id = ?
+              AND match_fingerprint != ?
+            ORDER BY finished_at DESC, id DESC
+            """,
+            (season_id, current_fingerprint),
+        )
+        rows = await cursor.fetchall()
+    finally:
+        await db.close()
+
+    found: dict[str, str] = {}
+    for row in rows:
+        raw = row["rating_changes_json"]
+        if not raw:
+            continue
+        try:
+            changes = json.loads(raw)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        if not isinstance(changes, list):
+            continue
+
+        for item in changes:
+            if not isinstance(item, dict):
+                continue
+            username = item.get("username")
+            bracket = item.get("new_bracket")
+            if not isinstance(username, str) or not username.strip():
+                continue
+            key = username.strip().casefold()
+            if key not in targets or key in found:
+                continue
+            if isinstance(bracket, str) and bracket.strip():
+                found[key] = bracket.strip().casefold()
+
+        if targets.issubset(found):
+            break
+
+    return found
+
 async def mark_match_posted(season_id:int, fingerprint:str):
     db=await connect()
     try:

@@ -83,22 +83,62 @@ def build_vote_history_png(game_data: dict) -> bytes | None:
     if not columns:
         return None
 
-    name_width = 230
     cell_width = 52
     row_height = 42
     mission_header_height = 34
     pick_header_height = 30
     header_height = mission_header_height + pick_header_height
+
+    player_font = _font(15)
+    header_font = _font(15, True)
+    pick_font = _font(12, True)
+
+    # Size the username column to the actual longest name instead of reserving
+    # a large fixed block of empty space.
+    measure_image = Image.new("RGB", (1, 1), "white")
+    measure_draw = ImageDraw.Draw(measure_image)
+    name_width = max(
+        80,
+        max(
+            (
+                measure_draw.textbbox(
+                    (0, 0),
+                    str(player),
+                    font=player_font,
+                )[2]
+                for player in ordered
+            ),
+            default=64,
+        )
+        + 16,
+    )
+
     width = name_width + cell_width * len(columns) + 2
     height = header_height + row_height * len(ordered) + 2
 
     image = Image.new("RGB", (width, height), "white")
     draw = ImageDraw.Draw(image)
-    player_font = _font(15)
-    header_font = _font(15, True)
-    pick_font = _font(12, True)
 
     mission_history = game_data.get("missionHistory") or []
+
+    roles = ((game_data.get("see") or {}).get("roles") or [])
+    roles_by_player = {
+        str(player).casefold(): (
+            str(roles[index])
+            if index < len(roles) and roles[index] is not None
+            else ""
+        )
+        for index, player in enumerate(players)
+    }
+    spy_roles = {
+        "spy",
+        "assassin",
+        "morgana",
+        "mordred",
+        "oberon",
+        "hitberon",
+        "mordredassassin",
+    }
 
     draw.rectangle(
         (0, 0, name_width, header_height),
@@ -155,12 +195,18 @@ def build_vote_history_png(game_data: dict) -> bytes | None:
 
     for row_index, player in enumerate(ordered):
         y = header_height + row_index * row_height
+        role_key = (
+            roles_by_player.get(str(player).casefold(), "")
+            .replace(" ", "")
+            .casefold()
+        )
+        name_fill = "#FFB3B3" if role_key in spy_roles else "#f5f5f5"
         draw.rectangle(
             (0, y, name_width, y + row_height),
-            fill="#f5f5f5",
+            fill=name_fill,
             outline="#8a8a8a",
         )
-        shown_name = player if len(player) <= 25 else player[:24] + "…"
+        shown_name = str(player)
         draw.text((8, y + 11), shown_name, fill="black", font=player_font)
 
         player_history = history.get(player) or []

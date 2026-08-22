@@ -9,6 +9,7 @@ import discord
 
 from database.matches import (
     get_enabled_match_configs,
+    get_previous_player_brackets,
     mark_match_posted,
     save_match,
 )
@@ -398,6 +399,20 @@ class ProAvalonRatingTracker:
             embed.add_field(name="Missions", value=" ".join(icons), inline=False)
         player_update_lines: list[str] = []
         display_map = await self._player_display_map(season)
+
+        # Use the previous archived match as the canonical "before" rank for
+        # announcements. The live lobby feed can occasionally lag by one game,
+        # which used to make the same promotion/demotion appear repeatedly.
+        previous_brackets = await get_previous_player_brackets(
+            int(season["id"]),
+            fingerprint,
+            [
+                str(item.get("username", ""))
+                for item in changes
+                if isinstance(item, dict)
+            ],
+        )
+
         rank_order = {
             "unranked": 0,
             "iron": 1,
@@ -458,7 +473,9 @@ class ProAvalonRatingTracker:
             else:
                 other_players.append((sort_key, line))
 
-            old = item.get("old_bracket")
+            username_key = str(item["username"]).casefold()
+            recorded_old = previous_brackets.get(username_key)
+            old = recorded_old or item.get("old_bracket")
             new = item.get("new_bracket")
             if old and new and str(old).casefold() != str(new).casefold():
                 old_key = str(old).casefold()
