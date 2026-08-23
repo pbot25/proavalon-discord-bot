@@ -48,6 +48,14 @@ class ProAvalonRatingTracker:
         self._initially_inspected = set()
         self._final_visit_started = set()
 
+        # Timing observed from ProAvalon's global game-list updates. This lets
+        # the bot report game duration without needing private database access.
+        # The first "Game in progress" update is treated as the start; the
+        # first "Finished" update is treated as the end.
+        self._game_started_at: dict[int, datetime] = {}
+        self._game_finished_at: dict[int, datetime] = {}
+        self._assassination_started_at: dict[int, datetime] = {}
+
     def start(self) -> None:
         if self._task is not None and not self._task.done():
             return
@@ -179,6 +187,70 @@ class ProAvalonRatingTracker:
 
             await asyncio.sleep(0.75)
 
+    def _observe_game_timing(self, games: list[dict]) -> None:
+        """Record start/end and likely assassination-start times from lobby updates."""
+        now = datetime.now(timezone.utc)
+        live_room_ids: set[int] = set()
+
+        for game in games:
+            if not isinstance(game, dict) or game.get("roomId") is None:
+                continue
+            try:
+                room_id = int(game["roomId"])
+            except (TypeError, ValueError):
+                continue
+
+            live_room_ids.add(room_id)
+            status = str(game.get("status") or "").casefold()
+
+            if status == "game in progress":
+                self._game_started_at.setdefault(room_id, now)
+
+                # In standard Avalon, three successful missions lead into the
+                # assassination/spy-shot phase. update-current-games-list is
+                # broadcast when mission state changes, so this is the closest
+                # public socket timestamp available to a spectator bot.
+                mission_history = game.get("missionHistory") or []
+                succeeded = sum(
+                    1
+                    for result in mission_history
+                    if str(result).casefold() == "succeeded"
+                )
+                if succeeded >= 3:
+                    self._assassination_started_at.setdefault(room_id, now)
+
+            elif status == "finished":
+                self._game_finished_at.setdefault(room_id, now)
+
+        # Timing for vanished rooms is no longer useful unless the room is
+        # currently being finalized.
+        known = (
+            set(self._tracked)
+            | self._finalizing
+            | live_room_ids
+        )
+        for mapping in (
+            self._game_started_at,
+            self._game_finished_at,
+            self._assassination_started_at,
+        ):
+            for room_id in list(mapping):
+                if room_id not in known:
+                    mapping.pop(room_id, None)
+
+    @staticmethod
+    def _format_duration(seconds: float | None) -> str | None:
+        if seconds is None or seconds < 0:
+            return None
+        total = int(round(seconds))
+        hours, remainder = divmod(total, 3600)
+        minutes, secs = divmod(remainder, 60)
+        if hours:
+            return f"{hours}h {minutes}m {secs}s"
+        if minutes:
+            return f"{minutes}m {secs}s"
+        return f"{secs}s"
+
     async def _listen_once(self) -> None:
         source = self.scraper.get_authenticated_session()
         jar = aiohttp.CookieJar()
@@ -221,6 +293,7 @@ class ProAvalonRatingTracker:
                             if count:
                                 print(f"Updated last-known ratings for {count} online players.")
                         elif event == "update-current-games-list" and isinstance(event_data, list):
+                            self._observe_game_timing(event_data)
                             self._games = {int(g["roomId"]): g for g in event_data if isinstance(g, dict) and g.get("roomId") is not None}
                         elif event == "update-room-players" and isinstance(event_data, list) and self._current_room is not None:
                             names = [p.get("username") for p in event_data if isinstance(p, dict) and isinstance(p.get("username"), str)]
@@ -247,7 +320,19 @@ class ProAvalonRatingTracker:
                 matched.append(season)
         if not matched:
             return
-        state = self._tracked.setdefault(room_id, {"detected_at": datetime.now(timezone.utc).isoformat(), "seasons": {}, "pre": {}, "last_data": None})
+        detected_now = datetime.now(timezone.utc)
+        state = self._tracked.setdefault(
+            room_id,
+            {
+                "detected_at": detected_now.isoformat(),
+                "game_started_at": (
+                    self._game_started_at.get(room_id, detected_now).isoformat()
+                ),
+                "seasons": {},
+                "pre": {},
+                "last_data": None,
+            },
+        )
         for name in names:
             snap = get_cached_rating(name)
             if snap is not None and name.casefold() not in state["pre"]:
@@ -302,6 +387,27 @@ class ProAvalonRatingTracker:
                     "old_bracket": before["bracket"] if before else None,
                     "new_bracket": after.rating_bracket if after else None,
                 })
+            # Use the first public lobby timestamps we observed for start/end.
+            # This is normally within one game-list update of ProAvalon's own
+            # server timestamps.
+            started_at = self._game_started_at.get(room_id)
+            finished_at = self._game_finished_at.get(
+                room_id,
+                datetime.now(timezone.utc),
+            )
+            game_duration_seconds = (
+                (finished_at - started_at).total_seconds()
+                if started_at is not None
+                else None
+            )
+
+            assassination_started_at = self._assassination_started_at.get(room_id)
+            shot_duration_seconds = (
+                (finished_at - assassination_started_at).total_seconds()
+                if assassination_started_at is not None
+                else None
+            )
+
             canonical = json.dumps({"room":room_id,"players":[x.casefold() for x in real_players],"winner":data.get("winner"),"missions":data.get("missionHistory"),"votes":data.get("voteHistory")}, sort_keys=True, separators=(",",":"))
             fingerprint = hashlib.sha256(canonical.encode()).hexdigest()
             for sid, season in state["seasons"].items():
@@ -313,10 +419,19 @@ class ProAvalonRatingTracker:
                         season, real_players
                     )
                     await self._post_match(
-                        season, fingerprint, data, changes, role_sync_result
+                        season,
+                        fingerprint,
+                        data,
+                        changes,
+                        role_sync_result,
+                        game_duration_seconds=game_duration_seconds,
+                        shot_duration_seconds=shot_duration_seconds,
                     )
             self._tracked.pop(room_id, None)
             self._room_rosters.pop(room_id, None)
+            self._game_started_at.pop(room_id, None)
+            self._game_finished_at.pop(room_id, None)
+            self._assassination_started_at.pop(room_id, None)
         finally:
             self._finalizing.discard(room_id)
 
@@ -380,7 +495,17 @@ class ProAvalonRatingTracker:
             if row["discord_user_id"] is not None
         }
 
-    async def _post_match(self, season, fingerprint, data, changes, role_sync_result=None):
+    async def _post_match(
+        self,
+        season,
+        fingerprint,
+        data,
+        changes,
+        role_sync_result=None,
+        *,
+        game_duration_seconds: float | None = None,
+        shot_duration_seconds: float | None = None,
+    ):
         if self.bot is None:
             return
         configs = await get_enabled_match_configs()
@@ -397,6 +522,13 @@ class ProAvalonRatingTracker:
         if missions:
             icons = ["✅" if str(x).casefold()=="succeeded" else "❌" if str(x).casefold()=="failed" else "➖" for x in missions]
             embed.add_field(name="Missions", value=" ".join(icons), inline=False)
+        game_time = self._format_duration(game_duration_seconds)
+        if game_time:
+            embed.add_field(
+                name="Game Time",
+                value=f"**{game_time}**",
+                inline=False,
+            )
         player_update_lines: list[str] = []
         display_map = await self._player_display_map(season)
 
@@ -487,13 +619,19 @@ class ProAvalonRatingTracker:
                 old_value = rank_order.get(old_key)
                 new_value = rank_order.get(new_key)
                 if old_value is not None and new_value is not None:
-                    direction = (
-                        "promoted" if new_value > old_value else "demoted"
-                    )
-                    player_update_lines.append(
-                        f"{display} has been **{direction}** to "
-                        f"**{str(new).title()}**!"
-                    )
+                    if old_key == "unranked" and new_key != "unranked":
+                        player_update_lines.append(
+                            f"{display} has earned their first rank: "
+                            f"**{str(new).title()}**!"
+                        )
+                    else:
+                        direction = (
+                            "promoted" if new_value > old_value else "demoted"
+                        )
+                        player_update_lines.append(
+                            f"{display} has been **{direction}** to "
+                            f"**{str(new).title()}**!"
+                        )
                 else:
                     player_update_lines.append(
                         f"{display} is now **{str(new).title()}**!"
@@ -522,9 +660,37 @@ class ProAvalonRatingTracker:
                 inline=False,
             )
 
+        # Ref of the Rain card history is already exposed by ProAvalon's
+        # public role/card game-data, just like the website's card-history UI.
+        public_data = data.get("publicData") or {}
+        public_cards = public_data.get("cards") or {}
+        ref_history: list[str] = []
+        if isinstance(public_cards, dict):
+            for card_key, card_data in public_cards.items():
+                if not isinstance(card_data, dict):
+                    continue
+                card_name = str(card_data.get("name") or card_key or "")
+                normalized = card_name.replace("_", " ").replace("-", " ").casefold()
+                if "ref" in normalized and "rain" in normalized:
+                    history = card_data.get("history") or []
+                    ref_history = [
+                        str(username)
+                        for username in history
+                        if isinstance(username, str) and username.strip()
+                    ]
+                    if ref_history:
+                        break
+
+        if ref_history:
+            embed.add_field(
+                name="Ref of the Rain",
+                value=" → ".join(f"`{username}`" for username in ref_history),
+                inline=False,
+            )
+
         # The Assassin public-data payload contains the assassination target.
         # It is available to spectators in the final cumulative game-data.
-        public_roles = ((data.get("publicData") or {}).get("roles") or {})
+        public_roles = (public_data.get("roles") or {})
         shot_names = [
             public_roles.get("assassinShotUsername"),
             public_roles.get("assassinShotUsername2"),
@@ -543,6 +709,9 @@ class ProAvalonRatingTracker:
             for name in shot_names:
                 shot_role = roles_by_name.get(name.casefold(), "Unknown")
                 shot_lines.append(f"`{name}` — **{shot_role}**")
+            shot_time = self._format_duration(shot_duration_seconds)
+            if shot_time:
+                shot_lines.append(f"**Shot time:** {shot_time}")
             embed.add_field(
                 name="Shot",
                 value="\n".join(shot_lines),
