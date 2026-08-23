@@ -16,6 +16,7 @@ from database.discord_roles import (
     get_active_season_linked_users,
     get_assignment,
     get_award_assignments,
+    get_all_award_minimum_games,
     get_award_minimum_games,
     get_known_ratings,
     get_rank_assignments,
@@ -52,6 +53,13 @@ ROLE_TARGET_CHOICES = [
     app_commands.Choice(name=ROLE_TARGET_NAMES[key], value=key)
     for key in ALL_ROLE_KEYS
 ]
+
+AWARD_TARGET_CHOICES = [
+    app_commands.Choice(name=ROLE_TARGET_NAMES[key], value=key)
+    for key in AWARD_KEYS
+]
+
+PROVISIONAL_GAMES = 20
 
 VALID_BRACKETS = {
     "unranked", "iron", "bronze", "silver", "gold",
@@ -399,7 +407,7 @@ class DiscordRoleCommands(
                 ):
                     result.profile_failures += 1
 
-        minimum_games = await get_award_minimum_games(guild.id)
+        award_minimums = await get_all_award_minimum_games(guild.id)
         game_size_key = f"{int(season['tracked_player_count'])}p"
 
         # Build candidate records once.
@@ -423,7 +431,10 @@ class DiscordRoleCommands(
                 "rating": rating,
             }
 
-        def best_alignment(metric: str) -> list[dict]:
+        def best_alignment(
+            metric: str,
+            minimum_games: int,
+        ) -> list[dict]:
             games_key = f"{metric}_games"
             wr_key = f"{metric}_wr"
             eligible = [
@@ -441,8 +452,15 @@ class DiscordRoleCommands(
                 if item[wr_key] == best_wr
             ]
 
-        best_res = best_alignment("res")
-        best_spy = best_alignment("spy")
+        # Resistance/Spy awards count games in that alignment specifically.
+        best_res = best_alignment(
+            "res",
+            award_minimums["award_best_resistance"],
+        )
+        best_spy = best_alignment(
+            "spy",
+            award_minimums["award_best_spy"],
+        )
 
         for role_key, winners in (
             ("award_best_resistance", best_res),
@@ -462,31 +480,44 @@ class DiscordRoleCommands(
                 result,
             )
 
-        rated_candidates = []
+        rated_candidates: list[tuple[int, int, str, int]] = []
         for user_id, username in linked:
             rating_data = ratings.get(username.casefold())
             candidate = candidate_by_username.get(username.casefold())
-            # Highest/lowest rating awards require at least one tracked game.
-            # A freshly linked 0-GP account must not receive either award.
-            if (
-                rating_data is not None
-                and candidate is not None
-                and candidate["overall_games"] >= 1
-            ):
+            if rating_data is not None and candidate is not None:
                 rated_candidates.append(
-                    (int(rating_data[0]), user_id, username)
+                    (
+                        int(rating_data[0]),
+                        user_id,
+                        username,
+                        int(candidate["overall_games"]),
+                    )
                 )
 
-        highest_winners: list[tuple[int, int, str]] = []
-        lowest_winners: list[tuple[int, int, str]] = []
-        if rated_candidates:
-            highest_rating = max(item[0] for item in rated_candidates)
-            lowest_rating = min(item[0] for item in rated_candidates)
+        # Rating awards use total tracked games. Highest and Lowest Rating may
+        # have independent minimum-game requirements.
+        highest_eligible = [
+            item
+            for item in rated_candidates
+            if item[3] >= award_minimums["award_highest_rating"]
+        ]
+        lowest_eligible = [
+            item
+            for item in rated_candidates
+            if item[3] >= award_minimums["award_lowest_rating"]
+        ]
+
+        highest_winners: list[tuple[int, int, str, int]] = []
+        lowest_winners: list[tuple[int, int, str, int]] = []
+        if highest_eligible:
+            highest_rating = max(item[0] for item in highest_eligible)
             highest_winners = [
-                item for item in rated_candidates if item[0] == highest_rating
+                item for item in highest_eligible if item[0] == highest_rating
             ]
+        if lowest_eligible:
+            lowest_rating = min(item[0] for item in lowest_eligible)
             lowest_winners = [
-                item for item in rated_candidates if item[0] == lowest_rating
+                item for item in lowest_eligible if item[0] == lowest_rating
             ]
 
         for role_key, winners in (
@@ -543,6 +574,10 @@ class DiscordRoleCommands(
     @app_commands.describe(
         target="Rank/award this Discord role represents.",
         role="Discord role the bot should manage.",
+        minimum_matches=(
+            "Special awards only. Minimum qualifying games; defaults to "
+            "ProAvalon's 20-game provisional threshold."
+        ),
     )
     @app_commands.choices(target=ROLE_TARGET_CHOICES)
     @bot_admin_only()
@@ -551,6 +586,7 @@ class DiscordRoleCommands(
         interaction: discord.Interaction,
         target: app_commands.Choice[str],
         role: discord.Role,
+        minimum_matches: app_commands.Range[int, 1, 999] = PROVISIONAL_GAMES,
     ) -> None:
         if interaction.guild is None:
             await interaction.response.send_message(
@@ -577,17 +613,42 @@ class DiscordRoleCommands(
             )
             return
 
+        await interaction.response.defer(thinking=True, ephemeral=True)
+
         try:
             await set_role_config(interaction.guild.id, target.value, role.id)
+            if target.value in AWARD_KEYS:
+                await set_award_minimum_games(
+                    interaction.guild.id,
+                    target.value,
+                    minimum_matches,
+                )
         except ValueError as error:
-            await interaction.response.send_message(str(error), ephemeral=True)
+            await interaction.followup.send(str(error), ephemeral=True)
             return
 
-        await interaction.response.send_message(
-            f"{role.mention} is now the **{target.name}** role. "
-            "Use `/roles sync` to apply it immediately.",
-            ephemeral=True,
+        # Applying a role configuration should take effect immediately rather
+        # than waiting for the next match or 15-minute backup sync.
+        result = await self.sync_guild(interaction.guild)
+
+        message = f"{role.mention} is now the **{target.name}** role."
+        if target.value in AWARD_KEYS:
+            unit = (
+                "Resistance games"
+                if target.value == "award_best_resistance"
+                else "Spy games"
+                if target.value == "award_best_spy"
+                else "total games"
+            )
+            message += (
+                f"\nMinimum requirement: **{minimum_matches} {unit}**."
+            )
+        message += (
+            f"\n\nRoles updated immediately: "
+            f"**{result.added} added**, **{result.removed} removed**."
         )
+
+        await interaction.followup.send(message, ephemeral=True)
 
     @app_commands.command(
         name="clear",
@@ -615,25 +676,89 @@ class DiscordRoleCommands(
             ephemeral=True,
         )
 
-    @app_commands.command(
-        name="minimum-games",
-        description="Sets the GP requirement for Best Resistance/Spy WR roles.",
-    )
-    @bot_admin_only()
-    async def minimum_games(
+    async def _set_minimum_matches_and_sync(
         self,
         interaction: discord.Interaction,
-        games: app_commands.Range[int, 1, 999] = 5,
+        target: app_commands.Choice[str],
+        games: int,
     ) -> None:
-        if interaction.guild_id is None:
+        if interaction.guild is None:
             await interaction.response.send_message(
                 "This command can only be used in a server.", ephemeral=True
             )
             return
-        await set_award_minimum_games(interaction.guild_id, games)
-        await interaction.response.send_message(
-            f"Best Resistance/Spy roles now require at least **{games} games**.",
+
+        await interaction.response.defer(thinking=True, ephemeral=True)
+        await set_award_minimum_games(
+            interaction.guild.id,
+            target.value,
+            games,
+        )
+
+        # Important: immediately recalculate all holders. Raising the
+        # requirement therefore removes the role from anyone who no longer
+        # qualifies before this command returns.
+        result = await self.sync_guild(interaction.guild)
+
+        unit = (
+            "Resistance games"
+            if target.value == "award_best_resistance"
+            else "Spy games"
+            if target.value == "award_best_spy"
+            else "total games"
+        )
+        await interaction.followup.send(
+            (
+                f"**{target.name}** now requires at least "
+                f"**{games} {unit}**.\n"
+                f"Roles updated immediately: **{result.added} added**, "
+                f"**{result.removed} removed**."
+            ),
             ephemeral=True,
+        )
+
+    @app_commands.command(
+        name="minimum-matches",
+        description="Sets the qualifying game minimum for one special award role.",
+    )
+    @app_commands.describe(
+        target="Special role whose qualifying minimum should change.",
+        games="Required games. Defaults to ProAvalon's 20-game provisional threshold.",
+    )
+    @app_commands.choices(target=AWARD_TARGET_CHOICES)
+    @bot_admin_only()
+    async def minimum_matches(
+        self,
+        interaction: discord.Interaction,
+        target: app_commands.Choice[str],
+        games: app_commands.Range[int, 1, 999] = PROVISIONAL_GAMES,
+    ) -> None:
+        await self._set_minimum_matches_and_sync(
+            interaction,
+            target,
+            int(games),
+        )
+
+    @app_commands.command(
+        name="minimum-games",
+        description="Alias for /roles minimum-matches.",
+    )
+    @app_commands.describe(
+        target="Special role whose qualifying minimum should change.",
+        games="Required games. Defaults to 20.",
+    )
+    @app_commands.choices(target=AWARD_TARGET_CHOICES)
+    @bot_admin_only()
+    async def minimum_games(
+        self,
+        interaction: discord.Interaction,
+        target: app_commands.Choice[str],
+        games: app_commands.Range[int, 1, 999] = PROVISIONAL_GAMES,
+    ) -> None:
+        await self._set_minimum_matches_and_sync(
+            interaction,
+            target,
+            int(games),
         )
 
     @app_commands.command(
@@ -648,12 +773,15 @@ class DiscordRoleCommands(
             )
             return
         configs = await get_role_configs(interaction.guild.id)
-        minimum_games = await get_award_minimum_games(interaction.guild.id)
+        award_minimums = await get_all_award_minimum_games(
+            interaction.guild.id
+        )
         embed = discord.Embed(
             title="Automatic ProAvalon Roles",
             description=(
-                "Linked accounts are synchronized every **15 minutes**.\n"
-                f"Best Res/Spy minimum games: **{minimum_games}**"
+                "Roles refresh after tracked matches, on `/roles sync`, and "
+                "every **15 minutes** as a backup.\n"
+                "Default special-role minimum: **20 games**."
             ),
             color=discord.Color.blurple(),
         )
@@ -667,9 +795,18 @@ class DiscordRoleCommands(
         award_lines = []
         for key in AWARD_KEYS:
             role_id = configs.get(key)
+            minimum = award_minimums[key]
+            unit = (
+                "Res GP"
+                if key == "award_best_resistance"
+                else "Spy GP"
+                if key == "award_best_spy"
+                else "GP"
+            )
             award_lines.append(
                 f"**{ROLE_TARGET_NAMES[key]}:** "
                 + (f"<@&{role_id}>" if role_id else "Not configured")
+                + f" • Minimum: **{minimum} {unit}**"
             )
         embed.add_field(name="Rank Roles", value="\n".join(rank_lines), inline=False)
         embed.add_field(name="Season Award Roles", value="\n".join(award_lines), inline=False)

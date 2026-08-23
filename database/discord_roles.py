@@ -119,38 +119,84 @@ async def get_role_configs(guild_id: int) -> dict[str, int]:
         await database.close()
 
 
-async def get_award_minimum_games(guild_id: int) -> int:
+PROVISIONAL_GAMES = 20
+
+
+async def get_award_minimum_games(guild_id: int, role_key: str) -> int:
+    """Return the configured minimum games for one special award role."""
+    if role_key not in AWARD_KEYS:
+        raise ValueError("Minimum games can only be configured for special award roles.")
+
     database = await connect()
     try:
         cursor = await database.execute(
             """
-            SELECT award_minimum_games
-            FROM discord_role_settings
-            WHERE guild_id = ?
+            SELECT minimum_games
+            FROM discord_role_award_settings
+            WHERE guild_id = ? AND role_key = ?
             LIMIT 1
             """,
-            (_guild(guild_id),),
+            (_guild(guild_id), role_key),
         )
         row = await cursor.fetchone()
-        return int(row["award_minimum_games"]) if row is not None else 5
+        return int(row["minimum_games"]) if row is not None else PROVISIONAL_GAMES
     finally:
         await database.close()
 
 
-async def set_award_minimum_games(guild_id: int, minimum_games: int) -> None:
+async def get_all_award_minimum_games(guild_id: int) -> dict[str, int]:
+    """Return minimum-game thresholds for all four special award roles."""
+    database = await connect()
+    try:
+        cursor = await database.execute(
+            """
+            SELECT role_key, minimum_games
+            FROM discord_role_award_settings
+            WHERE guild_id = ?
+            """,
+            (_guild(guild_id),),
+        )
+        rows = await cursor.fetchall()
+        configured = {
+            str(row["role_key"]): int(row["minimum_games"])
+            for row in rows
+            if str(row["role_key"]) in AWARD_KEYS
+        }
+        return {
+            role_key: configured.get(role_key, PROVISIONAL_GAMES)
+            for role_key in AWARD_KEYS
+        }
+    finally:
+        await database.close()
+
+
+async def set_award_minimum_games(
+    guild_id: int,
+    role_key: str,
+    minimum_games: int,
+) -> None:
+    """Set one special award role's minimum-game requirement."""
+    if role_key not in AWARD_KEYS:
+        raise ValueError("Minimum games can only be configured for special award roles.")
+
     database = await connect()
     try:
         await database.execute(
             """
-            INSERT INTO discord_role_settings (
-                guild_id, award_minimum_games, updated_at
-            ) VALUES (?, ?, ?)
-            ON CONFLICT(guild_id)
+            INSERT INTO discord_role_award_settings (
+                guild_id, role_key, minimum_games, updated_at
+            ) VALUES (?, ?, ?, ?)
+            ON CONFLICT(guild_id, role_key)
             DO UPDATE SET
-                award_minimum_games = excluded.award_minimum_games,
+                minimum_games = excluded.minimum_games,
                 updated_at = excluded.updated_at
             """,
-            (_guild(guild_id), int(minimum_games), utc_now()),
+            (
+                _guild(guild_id),
+                role_key,
+                int(minimum_games),
+                utc_now(),
+            ),
         )
         await database.commit()
     finally:

@@ -292,6 +292,15 @@ CREATE TABLE IF NOT EXISTS discord_role_settings (
     updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS discord_role_award_settings (
+    guild_id TEXT NOT NULL,
+    role_key TEXT NOT NULL,
+    minimum_games INTEGER NOT NULL DEFAULT 20
+        CHECK (minimum_games >= 1),
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (guild_id, role_key)
+);
+
 CREATE TABLE IF NOT EXISTS discord_role_assignments (
     guild_id TEXT NOT NULL,
     assignment_key TEXT NOT NULL,
