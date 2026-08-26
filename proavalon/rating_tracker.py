@@ -517,7 +517,19 @@ class ProAvalonRatingTracker:
             try: channel = await self.bot.fetch_channel(int(config["channel_id"]))
             except discord.DiscordException: return
         winner = str(data.get("winner") or "Unknown")
-        embed = discord.Embed(title=f"Community Season {season['season_number']} — Match Result", description=f"**{winner} Victory**", color=discord.Color.blurple())
+        winner_key = winner.strip().casefold()
+        if winner_key in {"resistance", "res"}:
+            embed_color = discord.Color.green()
+        elif winner_key in {"spy", "spies"}:
+            embed_color = discord.Color.red()
+        else:
+            embed_color = discord.Color.blurple()
+
+        embed = discord.Embed(
+            title=f"Community Season {season['season_number']} — Match Result",
+            description=f"**{winner} Victory**",
+            color=embed_color,
+        )
         missions = data.get("missionHistory") or []
         if missions:
             icons = ["✅" if str(x).casefold()=="succeeded" else "❌" if str(x).casefold()=="failed" else "➖" for x in missions]
