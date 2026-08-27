@@ -22,6 +22,8 @@ AWARD_KEYS = (
     "award_highest_rating",
     "award_lowest_rating",
     "award_most_games",
+    "award_highest_crit_accuracy",
+    "award_lowest_crit_accuracy",
 )
 
 MINIMUM_AWARD_KEYS = (
@@ -359,5 +361,56 @@ async def get_rank_assignments(guild_id: int):
             (_guild(guild_id),),
         )
         return await cursor.fetchall()
+    finally:
+        await database.close()
+
+
+CRIT_ACCURACY_AWARD_KEYS = (
+    "award_highest_crit_accuracy",
+    "award_lowest_crit_accuracy",
+)
+DEFAULT_CRIT_MINIMUM_VOTES = 15
+
+
+async def get_crit_award_minimum_votes(guild_id: int, role_key: str) -> int:
+    if role_key not in CRIT_ACCURACY_AWARD_KEYS:
+        raise ValueError("Minimum votes can only be configured for crit accuracy award roles.")
+    database = await connect()
+    try:
+        cursor = await database.execute(
+            """
+            SELECT minimum_games
+            FROM discord_role_award_settings
+            WHERE guild_id = ? AND role_key = ?
+            LIMIT 1
+            """,
+            (_guild(guild_id), role_key),
+        )
+        row = await cursor.fetchone()
+        return int(row["minimum_games"]) if row is not None else DEFAULT_CRIT_MINIMUM_VOTES
+    finally:
+        await database.close()
+
+
+async def set_crit_award_minimum_votes(
+    guild_id: int, role_key: str, minimum_votes: int
+) -> None:
+    if role_key not in CRIT_ACCURACY_AWARD_KEYS:
+        raise ValueError("Minimum votes can only be configured for crit accuracy award roles.")
+    database = await connect()
+    try:
+        await database.execute(
+            """
+            INSERT INTO discord_role_award_settings (
+                guild_id, role_key, minimum_games, updated_at
+            ) VALUES (?, ?, ?, ?)
+            ON CONFLICT(guild_id, role_key)
+            DO UPDATE SET
+                minimum_games = excluded.minimum_games,
+                updated_at = excluded.updated_at
+            """,
+            (_guild(guild_id), role_key, int(minimum_votes), utc_now()),
+        )
+        await database.commit()
     finally:
         await database.close()

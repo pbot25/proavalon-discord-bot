@@ -24,6 +24,7 @@ from database.seasons import (
     register_season_player,
 )
 from proavalon.vote_chart import build_vote_history_png
+from database.voting_metrics import final_third_fail_wrong_voters_from_live_data
 
 
 class ProAvalonRatingTracker:
@@ -704,6 +705,20 @@ class ProAvalonRatingTracker:
             embed.add_field(
                 name="Ref of the Rain",
                 value=" → ".join(f"`{username}`" for username in ref_history),
+                inline=False,
+            )
+
+        # If Spies win by putting the third failed mission on the board,
+        # call out the Resistance players who approved that final dirty crit
+        # proposal. These same votes are included in their Crit Errors.
+        wrong_on_crit = final_third_fail_wrong_voters_from_live_data(data)
+        if wrong_on_crit:
+            embed.add_field(
+                name="Wrong on Crit",
+                value=(
+                    ", ".join(f"`{name}`" for name in wrong_on_crit)
+                    + " approved the dirty mission that gave Spies their third fail."
+                )[:1024],
                 inline=False,
             )
 

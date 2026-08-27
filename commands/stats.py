@@ -8,6 +8,7 @@ from discord.ext import commands
 from database.account_links import get_preferred_link_for_discord
 from database.known_players import get_known_proavalon_usernames
 from database.ratings import get_cached_rating
+from database.voting_metrics import get_player_voting_metrics
 from database.social_stats import (
     MIN_SHARED_GAMES,
     build_pair_social_stats,
@@ -1382,8 +1383,7 @@ class StatsCommands(
             profile.username
         )
 
-        await interaction.followup.send(
-            embed=build_profile_embed(
+        profile_embed = build_profile_embed(
                 profile=profile,
                 cache_hit=cache_hit,
                 tracked_player_count=tracked_player_count,
@@ -1404,7 +1404,110 @@ class StatsCommands(
                     else None
                 ),
             )
+
+        if active_season is not None and season_number is not None:
+            voting = await get_player_voting_metrics(
+                int(active_season["id"]), profile.username
+            )
+            accuracy = (
+                f"{voting.overall.accuracy:.1f}% "
+                f"({voting.overall.correct_votes}/{voting.overall.eligible_votes})"
+                if voting.overall.accuracy is not None
+                else "N/A (0 votes)"
+            )
+            profile_embed.add_field(
+                name="Crit Voting Accuracy",
+                value=accuracy,
+                inline=True,
+            )
+            profile_embed.add_field(
+                name="Crit Errors",
+                value=f"{voting.overall.crit_errors:,}",
+                inline=True,
+            )
+
+        await interaction.followup.send(embed=profile_embed)
+
+    @app_commands.command(
+        name="voting",
+        description="Shows detailed active-season crit voting metrics by Resistance role.",
+    )
+    @app_commands.describe(
+        username="ProAvalon username. Leave blank to use your linked account.",
+    )
+    async def voting(
+        self,
+        interaction: discord.Interaction,
+        username: str | None = None,
+    ) -> None:
+        if interaction.guild_id is None:
+            await interaction.response.send_message(
+                "This command can only be used in a server.", ephemeral=True
+            )
+            return
+        season = await get_active_season(interaction.guild_id)
+        if season is None:
+            await interaction.response.send_message(
+                "No community season is currently active.", ephemeral=True
+            )
+            return
+
+        clean_username = (username or "").strip()
+        if not clean_username:
+            link = await get_preferred_link_for_discord(
+                interaction.guild_id,
+                interaction.user.id,
+                int(season["season_number"]),
+            )
+            if link is None:
+                await interaction.response.send_message(
+                    "Link your ProAvalon account or provide a username.",
+                    ephemeral=True,
+                )
+                return
+            clean_username = str(link["proavalon_username"])
+
+        metrics = await get_player_voting_metrics(
+            int(season["id"]), clean_username
         )
+
+        def line(label, item):
+            accuracy = (
+                f"{item.accuracy:.1f}%"
+                if item.accuracy is not None else "N/A"
+            )
+            error_rate = (
+                f"{item.error_rate:.1f}%"
+                if item.error_rate is not None else "N/A"
+            )
+            return (
+                f"**{label}** — {item.correct_votes}/{item.eligible_votes} "
+                f"correct ({accuracy}) • {item.crit_errors} errors ({error_rate})"
+            )
+
+        embed = discord.Embed(
+            title=f"{metrics.username} — Crit Voting Metrics",
+            description=line("All Resistance Roles", metrics.overall),
+            color=discord.Color.blurple(),
+        )
+        for role_name in ("VT", "Lover", "Percival", "Merlin"):
+            item = metrics.by_role.get(role_name)
+            if item is not None and item.eligible_votes:
+                embed.add_field(
+                    name=role_name,
+                    value=(
+                        f"**Votes:** {item.eligible_votes}\n"
+                        f"**Accuracy:** {item.accuracy:.1f}% "
+                        f"({item.correct_votes}/{item.eligible_votes})\n"
+                        f"**Crit Errors:** {item.crit_errors} "
+                        f"({item.error_rate:.1f}%)"
+                    ),
+                    inline=True,
+                )
+        embed.set_footer(
+            text="Crit metrics are reconstructed from archived season vote history."
+        )
+        await interaction.response.send_message(embed=embed)
 
     @app_commands.command(
         name="compare",

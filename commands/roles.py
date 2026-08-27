@@ -25,8 +25,11 @@ from database.discord_roles import (
     set_assignment,
     set_award_minimum_games,
     set_role_config,
+    get_crit_award_minimum_votes,
+    set_crit_award_minimum_votes,
 )
 from database.seasons import get_active_season
+from database.voting_metrics import get_season_voting_metrics
 from proavalon.profile_scraper import (
     ProAvalonError,
     ProAvalonLoginError,
@@ -49,6 +52,8 @@ ROLE_TARGET_NAMES = {
     "award_highest_rating": "Highest Rating",
     "award_lowest_rating": "Lowest Rating",
     "award_most_games": "Most Games Played",
+    "award_highest_crit_accuracy": "Highest Crit Voting Accuracy",
+    "award_lowest_crit_accuracy": "Lowest Crit Voting Accuracy",
 }
 
 ROLE_TARGET_CHOICES = [
@@ -390,6 +395,8 @@ class DiscordRoleCommands(
                 "award_highest_rating",
                 "award_lowest_rating",
                 "award_most_games",
+                "award_highest_crit_accuracy",
+                "award_lowest_crit_accuracy",
             )
         )
 
@@ -520,6 +527,61 @@ class DiscordRoleCommands(
                 linked_members,
                 result,
             )
+
+        # Crit Voting Accuracy awards use archived eligible crit VOTES,
+        # not games. Default qualification is 15 votes.
+        if (
+            "award_highest_crit_accuracy" in configs
+            or "award_lowest_crit_accuracy" in configs
+        ):
+            voting_metrics = await get_season_voting_metrics(int(season["id"]))
+            crit_candidates = []
+            for user_id, username in linked:
+                item = voting_metrics.get(username.casefold())
+                if item is None or item.overall.accuracy is None:
+                    continue
+                crit_candidates.append({
+                    "user_id": user_id,
+                    "username": username,
+                    "votes": item.overall.eligible_votes,
+                    "accuracy": item.overall.accuracy,
+                })
+
+            for role_key, choose_highest in (
+                ("award_highest_crit_accuracy", True),
+                ("award_lowest_crit_accuracy", False),
+            ):
+                minimum_votes = await get_crit_award_minimum_votes(
+                    guild.id, role_key
+                )
+                eligible = [
+                    item for item in crit_candidates
+                    if item["votes"] >= minimum_votes
+                ]
+                winners = []
+                if eligible:
+                    target = (
+                        max(item["accuracy"] for item in eligible)
+                        if choose_highest
+                        else min(item["accuracy"] for item in eligible)
+                    )
+                    winners = [
+                        item for item in eligible
+                        if abs(item["accuracy"] - target) < 1e-9
+                    ]
+                role_id = configs.get(role_key)
+                role = manageable_role(guild, role_id) if role_id else None
+                await self._set_award_holders(
+                    guild,
+                    role_key,
+                    role,
+                    [
+                        (int(w["user_id"]), str(w["username"]))
+                        for w in winners
+                    ],
+                    linked_members,
+                    result,
+                )
 
         rated_candidates: list[tuple[int, int, str, int]] = []
         for user_id, username in linked:
@@ -779,6 +841,44 @@ class DiscordRoleCommands(
             target,
             int(games),
         )
+
+    @app_commands.command(
+        name="minimum-votes",
+        description="Sets the eligible crit-vote minimum for a crit accuracy award role.",
+    )
+    @app_commands.describe(
+        target="Crit voting accuracy award role to configure.",
+        votes="Minimum eligible crit votes required. Defaults to 15.",
+    )
+    @app_commands.choices(
+        target=[
+            app_commands.Choice(
+                name="Highest Crit Voting Accuracy",
+                value="award_highest_crit_accuracy",
+            ),
+            app_commands.Choice(
+                name="Lowest Crit Voting Accuracy",
+                value="award_lowest_crit_accuracy",
+            ),
+        ],
+    )
+    @bot_admin_only()
+    async def minimum_votes(
+        self,
+        interaction: discord.Interaction,
+        target: app_commands.Choice[str],
+        votes: app_commands.Range[int, 1, 999] = 15,
+    ) -> None:
+        await set_crit_award_minimum_votes(
+            interaction.guild_id, target.value, votes
+        )
+        await interaction.response.send_message(
+            f"**{ROLE_TARGET_NAMES[target.value]}** now requires "
+            f"at least **{votes} eligible crit votes**.",
+            ephemeral=True,
+        )
+        # Apply removals/additions immediately after a threshold change.
+        await self.sync_guild(interaction.guild)
 
     @app_commands.command(
         name="minimum-games",

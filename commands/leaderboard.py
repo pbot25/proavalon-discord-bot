@@ -10,6 +10,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 from database.ratings import get_cached_rating
+from database.voting_metrics import get_season_voting_metrics
 from database.seasons import (
     get_active_season,
     get_season_players,
@@ -55,6 +56,8 @@ LEADERBOARD_CHOICES = [
         value="games_played",
     ),
     app_commands.Choice(name="Rating", value="rating"),
+    app_commands.Choice(name="Crit Voting Accuracy", value="crit_accuracy"),
+    app_commands.Choice(name="Crit Errors", value="crit_errors"),
     app_commands.Choice(name="Overall WR", value="overall"),
     app_commands.Choice(name="Resistance WR", value="resistance"),
     app_commands.Choice(name="Spy WR", value="spy"),
@@ -76,6 +79,8 @@ DISPLAY_NAMES = {
     "total_time": "Total Time Played",
     "games_played": "Most Games Played",
     "rating": "Rating",
+    "crit_accuracy": "Crit Voting Accuracy",
+    "crit_errors": "Crit Errors",
     "overall": "Overall Win Rate",
     "resistance": "Resistance Win Rate",
     "spy": "Spy Win Rate",
@@ -138,6 +143,7 @@ class LeaderboardEntry:
     rating: int | None = None
     rating_updated_at: str | None = None
     total_time_seconds: float | None = None
+    crit_errors: int = 0
 
     @property
     def win_rate(self) -> float:
@@ -324,6 +330,17 @@ def sort_entries(
     entries: list[LeaderboardEntry],
     metric: str,
 ) -> list[LeaderboardEntry]:
+    if metric == "crit_errors":
+        return sorted(
+            entries,
+            key=lambda entry: (
+                entry.crit_errors,
+                entry.crit_errors / entry.games if entry.games else 999.0,
+                -entry.games,
+                entry.username.casefold(),
+            ),
+        )
+
     if metric == "total_time":
         return sorted(
             entries,
@@ -473,6 +490,13 @@ def build_page_description(
             format_play_time(entry.total_time_seconds)
             for entry in page_entries
         ]
+    elif metric == "crit_errors":
+        metric_header = "Errors"
+        metric_texts = [
+            f"{entry.crit_errors} ({(entry.crit_errors / entry.games * 100):.1f}%)"
+            if entry.games else "0"
+            for entry in page_entries
+        ]
     elif metric == "rating":
         metric_header = "Rating"
         metric_texts = [
@@ -618,6 +642,13 @@ def build_daily_table(
         metric_header = "Time"
         metric_texts = [
             format_play_time(entry.total_time_seconds)
+            for entry in entries
+        ]
+    elif metric == "crit_errors":
+        metric_header = "Errors"
+        metric_texts = [
+            f"{entry.crit_errors} ({(entry.crit_errors / entry.games * 100):.1f}%)"
+            if entry.games else "0"
             for entry in entries
         ]
     elif metric == "rating":
@@ -865,7 +896,7 @@ class LeaderboardView(discord.ui.View):
         footer_parts = [
             showing_text,
             f"Page {self.page + 1}/{self.total_pages}",
-            f"Minimum games: {self.minimum_games}",
+            (f"Minimum votes: {self.minimum_games}" if self.metric in {"crit_accuracy", "crit_errors"} else f"Minimum games: {self.minimum_games}"),
         ]
 
         if self.requested_limit is not None:
@@ -1340,6 +1371,48 @@ class LeaderboardCommands(commands.Cog):
         await interaction.response.defer(
             thinking=True,
         )
+
+        effective_minimum = minimum_games
+        if statistic.value in {"crit_accuracy", "crit_errors"} and minimum_games == DEFAULT_MINIMUM_GAMES:
+            effective_minimum = 15
+
+        if statistic.value in {"crit_accuracy", "crit_errors"}:
+            voting = await get_season_voting_metrics(int(season["id"]))
+            entries = []
+            registered = {
+                str(row["proavalon_username"]).casefold()
+                for row in players
+            }
+            for key, item in voting.items():
+                if key not in registered or item.overall.eligible_votes < effective_minimum:
+                    continue
+                entries.append(
+                    LeaderboardEntry(
+                        username=item.username,
+                        games=item.overall.eligible_votes,
+                        wins=item.overall.correct_votes,
+                        losses=item.overall.eligible_votes - item.overall.correct_votes,
+                        crit_errors=item.overall.crit_errors,
+                    )
+                )
+            entries = sort_entries(entries, statistic.value)
+            total_qualifying_before_limit = len(entries)
+            displayed_entries = entries if players_shown is None else entries[:players_shown]
+            view = LeaderboardView(
+                entries=displayed_entries,
+                season_number=int(season["season_number"]),
+                metric=statistic.value,
+                minimum_games=effective_minimum,
+                requested_limit=players_shown,
+                total_qualifying_before_limit=total_qualifying_before_limit,
+                refreshed_count=0,
+                failed_count=0,
+                cache_hit=True,
+                cache_age_seconds=0,
+                requesting_user_id=interaction.user.id,
+            )
+            await interaction.followup.send(embed=view.build_embed(), view=view)
+            return
 
         (
             profiles,
