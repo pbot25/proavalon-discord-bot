@@ -10,6 +10,7 @@ from commands.leaderboard import get_metric_record
 from database.discord_roles import (
     ALL_ROLE_KEYS,
     AWARD_KEYS,
+    MINIMUM_AWARD_KEYS,
     RANK_KEYS,
     clear_assignment,
     clear_role_config,
@@ -47,6 +48,7 @@ ROLE_TARGET_NAMES = {
     "award_best_spy": "Best Spy WR",
     "award_highest_rating": "Highest Rating",
     "award_lowest_rating": "Lowest Rating",
+    "award_most_games": "Most Games Played",
 }
 
 ROLE_TARGET_CHOICES = [
@@ -56,7 +58,7 @@ ROLE_TARGET_CHOICES = [
 
 AWARD_TARGET_CHOICES = [
     app_commands.Choice(name=ROLE_TARGET_NAMES[key], value=key)
-    for key in AWARD_KEYS
+    for key in MINIMUM_AWARD_KEYS
 ]
 
 PROVISIONAL_GAMES = 20
@@ -387,6 +389,7 @@ class DiscordRoleCommands(
                 "award_best_spy",
                 "award_highest_rating",
                 "award_lowest_rating",
+                "award_most_games",
             )
         )
 
@@ -430,6 +433,44 @@ class DiscordRoleCommands(
                 "overall_games": res_w + res_l + spy_w + spy_l,
                 "rating": rating,
             }
+
+        # Most Games Played is based on the same tracked 10-player
+        # season record used for the other profile-derived season metrics.
+        # A player must have played at least one game; all ties share the role.
+        played_candidates = [
+            item
+            for item in candidate_by_username.values()
+            if item["overall_games"] >= 1
+        ]
+        most_games_winners: list[dict] = []
+        if played_candidates:
+            most_games = max(
+                item["overall_games"]
+                for item in played_candidates
+            )
+            most_games_winners = [
+                item
+                for item in played_candidates
+                if item["overall_games"] == most_games
+            ]
+
+        most_games_role_id = configs.get("award_most_games")
+        most_games_role = (
+            manageable_role(guild, most_games_role_id)
+            if most_games_role_id
+            else None
+        )
+        await self._set_award_holders(
+            guild,
+            "award_most_games",
+            most_games_role,
+            [
+                (int(winner["user_id"]), str(winner["username"]))
+                for winner in most_games_winners
+            ],
+            linked_members,
+            result,
+        )
 
         def best_alignment(
             metric: str,
@@ -617,7 +658,7 @@ class DiscordRoleCommands(
 
         try:
             await set_role_config(interaction.guild.id, target.value, role.id)
-            if target.value in AWARD_KEYS:
+            if target.value in MINIMUM_AWARD_KEYS:
                 await set_award_minimum_games(
                     interaction.guild.id,
                     target.value,
@@ -632,7 +673,7 @@ class DiscordRoleCommands(
         result = await self.sync_guild(interaction.guild)
 
         message = f"{role.mention} is now the **{target.name}** role."
-        if target.value in AWARD_KEYS:
+        if target.value in MINIMUM_AWARD_KEYS:
             unit = (
                 "Resistance games"
                 if target.value == "award_best_resistance"
@@ -795,19 +836,21 @@ class DiscordRoleCommands(
         award_lines = []
         for key in AWARD_KEYS:
             role_id = configs.get(key)
-            minimum = award_minimums[key]
-            unit = (
-                "Res GP"
-                if key == "award_best_resistance"
-                else "Spy GP"
-                if key == "award_best_spy"
-                else "GP"
-            )
-            award_lines.append(
+            line = (
                 f"**{ROLE_TARGET_NAMES[key]}:** "
                 + (f"<@&{role_id}>" if role_id else "Not configured")
-                + f" • Minimum: **{minimum} {unit}**"
             )
+            if key in MINIMUM_AWARD_KEYS:
+                minimum = award_minimums[key]
+                unit = (
+                    "Res GP"
+                    if key == "award_best_resistance"
+                    else "Spy GP"
+                    if key == "award_best_spy"
+                    else "GP"
+                )
+                line += f" • Minimum: **{minimum} {unit}**"
+            award_lines.append(line)
         embed.add_field(name="Rank Roles", value="\n".join(rank_lines), inline=False)
         embed.add_field(name="Season Award Roles", value="\n".join(award_lines), inline=False)
         embed.set_footer(

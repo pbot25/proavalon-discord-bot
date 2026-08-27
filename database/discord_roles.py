@@ -21,6 +21,14 @@ AWARD_KEYS = (
     "award_best_spy",
     "award_highest_rating",
     "award_lowest_rating",
+    "award_most_games",
+)
+
+MINIMUM_AWARD_KEYS = (
+    "award_best_resistance",
+    "award_best_spy",
+    "award_highest_rating",
+    "award_lowest_rating",
 )
 
 ALL_ROLE_KEYS = RANK_KEYS + AWARD_KEYS
@@ -124,8 +132,8 @@ PROVISIONAL_GAMES = 20
 
 async def get_award_minimum_games(guild_id: int, role_key: str) -> int:
     """Return the configured minimum games for one special award role."""
-    if role_key not in AWARD_KEYS:
-        raise ValueError("Minimum games can only be configured for special award roles.")
+    if role_key not in MINIMUM_AWARD_KEYS:
+        raise ValueError("Minimum games can only be configured for rating/WR award roles.")
 
     database = await connect()
     try:
@@ -164,7 +172,7 @@ async def get_all_award_minimum_games(guild_id: int) -> dict[str, int]:
         }
         return {
             role_key: configured.get(role_key, PROVISIONAL_GAMES)
-            for role_key in AWARD_KEYS
+            for role_key in MINIMUM_AWARD_KEYS
         }
     finally:
         await database.close()
@@ -176,8 +184,8 @@ async def set_award_minimum_games(
     minimum_games: int,
 ) -> None:
     """Set one special award role's minimum-game requirement."""
-    if role_key not in AWARD_KEYS:
-        raise ValueError("Minimum games can only be configured for special award roles.")
+    if role_key not in MINIMUM_AWARD_KEYS:
+        raise ValueError("Minimum games can only be configured for rating/WR award roles.")
 
     database = await connect()
     try:

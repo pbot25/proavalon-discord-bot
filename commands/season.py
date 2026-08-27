@@ -28,6 +28,7 @@ from database.account_links import (
 )
 
 from utils.permissions import bot_admin_only
+from database.insights import season_rows
 from database.matches import (
     disable_match_channel,
     get_match_config,
@@ -1220,14 +1221,47 @@ class SeasonCommands(
         )
 
         embed.add_field(
-            name="Tracked game size",
-            value=f"{season['tracked_player_count']} players",
+            name="Registered players",
+            value=f"{player_count:,}",
             inline=True,
         )
 
+        archived_matches = await season_rows(season["id"])
+        total_games = len(archived_matches)
+        resistance_wins = sum(
+            1
+            for row in archived_matches
+            if str(row["winner"] or "").casefold().startswith("res")
+        )
+        spy_wins = sum(
+            1
+            for row in archived_matches
+            if str(row["winner"] or "").casefold().startswith("spy")
+        )
+        resistance_wr = (
+            resistance_wins / total_games * 100
+            if total_games
+            else 0.0
+        )
+        spy_wr = (
+            spy_wins / total_games * 100
+            if total_games
+            else 0.0
+        )
+
         embed.add_field(
-            name="Registered players",
-            value=f"{player_count:,}",
+            name="Games played",
+            value=f"{total_games:,}",
+            inline=True,
+        )
+        embed.add_field(
+            name="Resistance",
+            value=f"{resistance_wins:,} wins • {resistance_wr:.1f}% WR",
+            inline=True,
+        )
+        embed.add_field(
+            name="Spies",
+            value=f"{spy_wins:,} wins • {spy_wr:.1f}% WR",
             inline=True,
         )
 

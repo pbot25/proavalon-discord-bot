@@ -85,12 +85,13 @@ def build_vote_history_png(game_data: dict) -> bytes | None:
 
     cell_width = 52
     row_height = 42
-    mission_header_height = 34
+    mission_header_height = 44
     pick_header_height = 30
     header_height = mission_header_height + pick_header_height
 
     player_font = _font(15)
     header_font = _font(15, True)
+    fail_font = _font(12, True)
     pick_font = _font(12, True)
 
     # Size the username column to the actual longest name instead of reserving
@@ -120,6 +121,7 @@ def build_vote_history_png(game_data: dict) -> bytes | None:
     draw = ImageDraw.Draw(image)
 
     mission_history = game_data.get("missionHistory") or []
+    fails_history = game_data.get("numFailsHistory") or []
 
     roles = ((game_data.get("see") or {}).get("roles") or [])
     roles_by_player = {
@@ -169,12 +171,35 @@ def build_vote_history_png(game_data: dict) -> bytes | None:
             fill=mission_fill,
             outline="#6f6f6f",
         )
+        fail_count = (
+            fails_history[mission_index]
+            if mission_index < len(fails_history)
+            else None
+        )
+
+        # Mission labels are always bold. Fail counts are shown only when at
+        # least one Fail card was played, on a small second line in bold
+        # maroon so they stand out without cluttering the table.
         _center_text(
             draw,
-            (x, 0, mission_right, mission_header_height),
+            (x, 1, mission_right, 24),
             f"M{mission_index + 1}",
             font=header_font,
         )
+
+        try:
+            numeric_fails = int(fail_count) if fail_count is not None else 0
+        except (TypeError, ValueError):
+            numeric_fails = 0
+
+        if numeric_fails > 0:
+            _center_text(
+                draw,
+                (x, 21, mission_right, mission_header_height - 1),
+                f"{numeric_fails}F",
+                font=fail_font,
+                fill="#800000",
+            )
 
         for proposal_index in range(proposal_count):
             left = x + proposal_index * cell_width

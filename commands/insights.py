@@ -211,6 +211,9 @@ class PastSeason(commands.GroupCog, group_name="past-season", group_description=
         names = {p["username"].casefold(): p["username"] for row in rows for p in unpack(row)}
         res_wins = sum(1 for row in rows if str(row["winner"] or "").casefold().startswith("res"))
         spy_wins = sum(1 for row in rows if str(row["winner"] or "").casefold().startswith("spy"))
+        total_games = len(rows)
+        res_wr = (res_wins / total_games * 100) if total_games else 0.0
+        spy_wr = (spy_wins / total_games * 100) if total_games else 0.0
         status = "Active" if season["is_active"] else "Archived"
 
         e = discord.Embed(
@@ -218,10 +221,18 @@ class PastSeason(commands.GroupCog, group_name="past-season", group_description=
             color=discord.Color.blurple(),
         )
         e.add_field(name="Status", value=status, inline=True)
-        e.add_field(name="Matches", value=str(len(rows)), inline=True)
-        e.add_field(name="Players Seen", value=str(len(names)), inline=True)
-        e.add_field(name="Resistance Wins", value=str(res_wins), inline=True)
-        e.add_field(name="Spy Wins", value=str(spy_wins), inline=True)
+        e.add_field(name="Games Played", value=f"{total_games:,}", inline=True)
+        e.add_field(name="Players Seen", value=f"{len(names):,}", inline=True)
+        e.add_field(
+            name="Resistance",
+            value=f"{res_wins:,} wins • {res_wr:.1f}% WR",
+            inline=True,
+        )
+        e.add_field(
+            name="Spies",
+            value=f"{spy_wins:,} wins • {spy_wr:.1f}% WR",
+            inline=True,
+        )
         e.add_field(name="Started", value=fmt_date(season["started_at"]), inline=True)
         e.add_field(name="Ended", value=fmt_date(season["ended_at"]) if season["ended_at"] else "Still active", inline=True)
         await interaction.response.send_message(embed=e)
