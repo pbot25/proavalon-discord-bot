@@ -204,6 +204,7 @@ CREATE TABLE IF NOT EXISTS season_match_configs (
 CREATE TABLE IF NOT EXISTS season_matches (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     community_season_id INTEGER NOT NULL,
+    season_match_id INTEGER,
     match_fingerprint TEXT NOT NULL,
     room_id INTEGER,
     detected_at TEXT NOT NULL,
@@ -223,6 +224,9 @@ CREATE TABLE IF NOT EXISTS season_matches (
 
 CREATE INDEX IF NOT EXISTS season_matches_by_season
 ON season_matches(community_season_id, finished_at);
+
+CREATE UNIQUE INDEX IF NOT EXISTS one_match_number_per_season
+ON season_matches(community_season_id, season_match_id);
 
 CREATE INDEX IF NOT EXISTS proavalon_ratings_updated
 ON proavalon_ratings(rating_updated_at);

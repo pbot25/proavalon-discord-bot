@@ -551,12 +551,14 @@ class UtilityCommands(commands.Cog):
     @app_commands.describe(
         subject="Short subject used as the feedback embed title.",
         message="Your feedback, suggestion, bug report, or other comment.",
+        anonymous="Hide your Discord identity from the submitted feedback. Defaults to false.",
     )
     async def feedback(
         self,
         interaction: discord.Interaction,
         subject: app_commands.Range[str, 1, 256],
         message: app_commands.Range[str, 1, 1500],
+        anonymous: bool = False,
     ) -> None:
         channel_id = await get_feedback_channel_id(
             interaction.guild_id
@@ -596,8 +598,12 @@ class UtilityCommands(commands.Cog):
         embed.add_field(
             name="Submitted by",
             value=(
-                f"{interaction.user.mention}\n"
-                f"`{interaction.user}` • `{interaction.user.id}`"
+                "**Anonymous**"
+                if anonymous
+                else (
+                    f"{interaction.user.mention}\n"
+                    f"`{interaction.user}` • `{interaction.user.id}`"
+                )
             ),
             inline=False,
         )

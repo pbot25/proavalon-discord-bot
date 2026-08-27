@@ -30,11 +30,63 @@ async def disable_match_channel(guild_id:int):
     finally: await db.close()
 
 async def save_match(*, season_id:int, fingerprint:str, room_id:int, detected_at:str, winner, game_mode, mission_history, fails_history, vote_history, players, roles, rating_changes):
+    """Archive a match and return its season-local public match ID, or None if duplicate."""
     db=await connect()
     try:
-        c=await db.execute("""INSERT OR IGNORE INTO season_matches(community_season_id,match_fingerprint,room_id,detected_at,finished_at,winner,game_mode,mission_history_json,fails_history_json,vote_history_json,players_json,roles_json,rating_changes_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",(season_id,fingerprint,room_id,detected_at,utc_now(),winner,game_mode,json.dumps(mission_history),json.dumps(fails_history),json.dumps(vote_history) if vote_history is not None else None,json.dumps(players),json.dumps(roles) if roles is not None else None,json.dumps(rating_changes)))
-        await db.commit(); return c.rowcount>0
-    finally: await db.close()
+        await db.execute("BEGIN IMMEDIATE")
+
+        existing = await db.execute(
+            """
+            SELECT season_match_id
+            FROM season_matches
+            WHERE community_season_id = ?
+              AND match_fingerprint = ?
+            LIMIT 1
+            """,
+            (season_id, fingerprint),
+        )
+        existing_row = await existing.fetchone()
+        if existing_row is not None:
+            await db.rollback()
+            return None
+
+        cursor = await db.execute(
+            """
+            SELECT COALESCE(MAX(season_match_id), 0) + 1 AS next_match_id
+            FROM season_matches
+            WHERE community_season_id = ?
+            """,
+            (season_id,),
+        )
+        next_row = await cursor.fetchone()
+        match_id = int(next_row["next_match_id"])
+
+        await db.execute(
+            """
+            INSERT INTO season_matches(
+                community_season_id, season_match_id, match_fingerprint,
+                room_id, detected_at, finished_at, winner, game_mode,
+                mission_history_json, fails_history_json, vote_history_json,
+                players_json, roles_json, rating_changes_json
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                season_id, match_id, fingerprint, room_id, detected_at,
+                utc_now(), winner, game_mode, json.dumps(mission_history),
+                json.dumps(fails_history),
+                json.dumps(vote_history) if vote_history is not None else None,
+                json.dumps(players),
+                json.dumps(roles) if roles is not None else None,
+                json.dumps(rating_changes),
+            ),
+        )
+        await db.commit()
+        return match_id
+    except Exception:
+        await db.rollback()
+        raise
+    finally:
+        await db.close()
 
 
 async def get_previous_player_brackets(

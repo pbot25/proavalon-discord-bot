@@ -5,9 +5,10 @@ import json
 import discord
 from discord import app_commands
 from discord.ext import commands
-from database.insights import active_or_latest,season_rows,recent_rows,find_match,registered_usernames,all_links_for_discord,bot_status_data,unpack,player_summary,streak_summary,role_summary,alignment_summary,role_board,activity_summary,season_records,ratings_for_usernames
+from database.insights import active_or_latest,season_rows,recent_rows,find_match,registered_usernames,all_links_for_discord,bot_status_data,unpack,player_summary,streak_summary,role_summary,alignment_summary,role_board,activity_summary,season_records,ratings_for_usernames,relationships
 from utils.permissions import bot_admin_only
 from utils.discord_users import parse_discord_user_id
+from database.seasons import get_season_by_prefix
 
 def fmt_date(v):
     if not v: return 'N/A'
@@ -40,17 +41,17 @@ class Insights(commands.Cog):
         if not rows: return await interaction.response.send_message('No archived matches yet.',ephemeral=True)
         e=discord.Embed(title=f"{s['required_prefix']} — Recent Matches",color=discord.Color.blurple())
         for r in rows:
-            players=json.loads(r['players_json']); e.add_field(name=f"Match #{r['id']} • Room {r['room_id'] or 'N/A'}",value=f"**{r['winner'] or 'Unknown'} Victory** • {fmt_date(r['finished_at'])}\n"+', '.join(players),inline=False)
+            players=json.loads(r['players_json']); e.add_field(name=f"Match #{r['season_match_id']} • {fmt_date(r['finished_at'])}",value=f"**{r['winner'] or 'Unknown'} Victory**\n"+', '.join(players),inline=False)
         await interaction.response.send_message(embed=e)
 
-    @app_commands.command(name='match',description='Shows one archived match by match ID or room ID.')
+    @app_commands.command(name='match',description='Shows one archived match by its season match ID.')
     async def match(self,interaction:discord.Interaction,match_id:int):
         s=await active_or_latest(interaction.guild_id)
         if not s: return await interaction.response.send_message('No season history exists.',ephemeral=True)
         r=await find_match(s['id'],match_id)
         if not r: return await interaction.response.send_message('That match was not found in this season.',ephemeral=True)
         parts=unpack(r); res=[p for p in parts if p['alignment']=='Resistance']; spies=[p for p in parts if p['alignment']=='Spy']
-        e=discord.Embed(title=f"Match #{r['id']} — {r['winner'] or 'Unknown'} Victory",description=f"Room {r['room_id'] or 'N/A'} • {fmt_date(r['finished_at'])}",color=discord.Color.blurple())
+        e=discord.Embed(title=f"Match #{r['season_match_id']} — {r['winner'] or 'Unknown'} Victory",description=f"{fmt_date(r['finished_at'])}",color=discord.Color.blurple())
         e.add_field(name='Resistance',value='\n'.join(f"`{p['username']}` — {p['role'] or 'Unknown'}" for p in res) or 'N/A',inline=False)
         e.add_field(name='Spies',value='\n'.join(f"`{p['username']}` — {p['role'] or 'Unknown'}" for p in spies) or 'N/A',inline=False)
         missions=json.loads(r['mission_history_json']); e.add_field(name='Missions',value=' '.join('✅' if str(x).casefold()=='succeeded' else '❌' for x in missions) or 'N/A',inline=False)
@@ -187,6 +188,174 @@ class Insights(commands.Cog):
         e.add_field(name='Feedback Channel',value='Not set' if not x['feedback'] else f"<#{x['feedback']['channel_id']}>",inline=True)
         e.add_field(name='Daily Leaderboard',value='Disabled/not set' if not x['daily'] or not x['daily']['enabled'] else f"Enabled • <#{x['daily']['channel_id']}>",inline=False)
         e.add_field(name='Match Posting',value='Disabled/not set' if not x['matchcfg'] or not x['matchcfg']['enabled'] else f"Enabled • <#{x['matchcfg']['channel_id']}>",inline=False)
-        await interaction.response.send_message(embed=e,ephemeral=True)
+        await interaction.response.send_message(embed=e)
 
-async def setup(bot:commands.Bot): await bot.add_cog(Insights(bot))
+
+class PastSeason(commands.GroupCog, group_name="past-season", group_description="Browse archived community seasons."):
+    def __init__(self, bot):
+        self.bot = bot
+
+    async def _season(self, interaction: discord.Interaction, prefix: str):
+        if interaction.guild_id is None:
+            return None
+        return await get_season_by_prefix(interaction.guild_id, prefix)
+
+    @app_commands.command(name="info", description="Shows general information about a previous season.")
+    @app_commands.describe(season_prefix="Season prefix, for example s4 or r1.")
+    async def info(self, interaction: discord.Interaction, season_prefix: str):
+        season = await self._season(interaction, season_prefix)
+        if not season:
+            return await interaction.response.send_message("That season prefix was not found.", ephemeral=True)
+
+        rows = await season_rows(season["id"])
+        names = {p["username"].casefold(): p["username"] for row in rows for p in unpack(row)}
+        res_wins = sum(1 for row in rows if str(row["winner"] or "").casefold().startswith("res"))
+        spy_wins = sum(1 for row in rows if str(row["winner"] or "").casefold().startswith("spy"))
+        status = "Active" if season["is_active"] else "Archived"
+
+        e = discord.Embed(
+            title=f"{season['required_prefix']} — Season Info",
+            color=discord.Color.blurple(),
+        )
+        e.add_field(name="Status", value=status, inline=True)
+        e.add_field(name="Matches", value=str(len(rows)), inline=True)
+        e.add_field(name="Players Seen", value=str(len(names)), inline=True)
+        e.add_field(name="Resistance Wins", value=str(res_wins), inline=True)
+        e.add_field(name="Spy Wins", value=str(spy_wins), inline=True)
+        e.add_field(name="Started", value=fmt_date(season["started_at"]), inline=True)
+        e.add_field(name="Ended", value=fmt_date(season["ended_at"]) if season["ended_at"] else "Still active", inline=True)
+        await interaction.response.send_message(embed=e)
+
+    @app_commands.command(name="recent", description="Shows recent matches from a previous season.")
+    @app_commands.describe(season_prefix="Season prefix, for example s4 or r1.")
+    async def recent(self, interaction: discord.Interaction, season_prefix: str, count: app_commands.Range[int,1,15]=5):
+        season = await self._season(interaction, season_prefix)
+        if not season:
+            return await interaction.response.send_message("That season prefix was not found.", ephemeral=True)
+        rows = await recent_rows(season["id"], count)
+        if not rows:
+            return await interaction.response.send_message("That season has no archived matches.", ephemeral=True)
+
+        e = discord.Embed(title=f"{season['required_prefix']} — Recent Matches", color=discord.Color.blurple())
+        for row in rows:
+            players = json.loads(row["players_json"])
+            e.add_field(
+                name=f"Match #{row['season_match_id']} • {fmt_date(row['finished_at'])}",
+                value=f"**{row['winner'] or 'Unknown'} Victory**\n" + ", ".join(players),
+                inline=False,
+            )
+        await interaction.response.send_message(embed=e)
+
+    @app_commands.command(name="match", description="Shows one match from a previous season.")
+    @app_commands.describe(season_prefix="Season prefix, for example s4 or r1.", match_id="Season-local match ID.")
+    async def match(self, interaction: discord.Interaction, season_prefix: str, match_id: app_commands.Range[int,1,None]):
+        season = await self._season(interaction, season_prefix)
+        if not season:
+            return await interaction.response.send_message("That season prefix was not found.", ephemeral=True)
+        row = await find_match(season["id"], int(match_id))
+        if not row:
+            return await interaction.response.send_message("That match ID was not found in that season.", ephemeral=True)
+
+        parts = unpack(row)
+        res = [p for p in parts if p["alignment"] == "Resistance"]
+        spies = [p for p in parts if p["alignment"] == "Spy"]
+        e = discord.Embed(
+            title=f"{season['required_prefix']} — Match #{row['season_match_id']}",
+            description=f"**{row['winner'] or 'Unknown'} Victory** • {fmt_date(row['finished_at'])}",
+            color=discord.Color.blurple(),
+        )
+        e.add_field(name="Resistance", value="\n".join(f"`{p['username']}` — {p['role'] or 'Unknown'}" for p in res) or "N/A", inline=False)
+        e.add_field(name="Spies", value="\n".join(f"`{p['username']}` — {p['role'] or 'Unknown'}" for p in spies) or "N/A", inline=False)
+        missions = json.loads(row["mission_history_json"])
+        e.add_field(name="Missions", value=" ".join("✅" if str(x).casefold()=="succeeded" else "❌" for x in missions) or "N/A", inline=False)
+        await interaction.response.send_message(embed=e)
+
+    @app_commands.command(name="leaderboard", description="Shows an archived leaderboard for a previous season.")
+    @app_commands.describe(
+        season_prefix="Season prefix, for example s4 or r1.",
+        statistic="Archived statistic to rank.",
+        minimum_games="Minimum qualifying games.",
+    )
+    @app_commands.choices(statistic=[
+        app_commands.Choice(name="Games Played", value="games"),
+        app_commands.Choice(name="Overall WR", value="overall"),
+        app_commands.Choice(name="Resistance WR", value="res"),
+        app_commands.Choice(name="Spy WR", value="spy"),
+    ])
+    async def leaderboard(
+        self,
+        interaction: discord.Interaction,
+        season_prefix: str,
+        statistic: app_commands.Choice[str],
+        minimum_games: app_commands.Range[int,1,999]=5,
+    ):
+        season = await self._season(interaction, season_prefix)
+        if not season:
+            return await interaction.response.send_message("That season prefix was not found.", ephemeral=True)
+        rows = await season_rows(season["id"])
+        names = sorted({p["username"] for row in rows for p in unpack(row)}, key=str.casefold)
+        data = []
+        for username in names:
+            overall = player_summary(rows, username)
+            aligns = alignment_summary(rows, username)
+            if statistic.value == "games":
+                games, value = overall["games"], overall["games"]
+            elif statistic.value == "res":
+                games, value = aligns["Resistance"]["games"], aligns["Resistance"]["wr"]
+            elif statistic.value == "spy":
+                games, value = aligns["Spy"]["games"], aligns["Spy"]["wr"]
+            else:
+                games, value = overall["games"], overall["wr"]
+            if games >= minimum_games:
+                data.append((username, games, value))
+
+        if statistic.value == "games":
+            data.sort(key=lambda x: (-x[2], x[0].casefold()))
+        else:
+            data.sort(key=lambda x: (-x[2], -x[1], x[0].casefold()))
+        if not data:
+            return await interaction.response.send_message("No players meet that requirement.", ephemeral=True)
+
+        label = {"games":"Games Played","overall":"Overall WR","res":"Resistance WR","spy":"Spy WR"}[statistic.value]
+        lines = []
+        for i,(username,games,value) in enumerate(data[:25],1):
+            metric = f"{int(value)} GP" if statistic.value=="games" else f"{value:.1f}% WR • {games} GP"
+            lines.append(f"**{i}.** `{username}` — {metric}")
+        e = discord.Embed(
+            title=f"{season['required_prefix']} — {label}",
+            description="\n".join(lines),
+            color=discord.Color.blurple(),
+        )
+        await interaction.response.send_message(embed=e)
+
+    @app_commands.command(name="records", description="Shows statistical records from a previous season.")
+    @app_commands.describe(season_prefix="Season prefix, for example s4 or r1.", minimum_games="Minimum games for rate records.")
+    async def records(self, interaction: discord.Interaction, season_prefix: str, minimum_games: app_commands.Range[int,1,999]=5):
+        season = await self._season(interaction, season_prefix)
+        if not season:
+            return await interaction.response.send_message("That season prefix was not found.", ephemeral=True)
+        rows = await season_rows(season["id"])
+        x = season_records(rows, minimum_games)
+        if not rows:
+            return await interaction.response.send_message("That season has no archived matches.", ephemeral=True)
+
+        def line(v, alignment_key=None):
+            if not v:
+                return "N/A"
+            if alignment_key:
+                a=v[alignment_key]
+                return f"`{v['username']}` — {a['wr']:.1f}% WR • {a['games']} GP"
+            return f"`{v['username']}` — {v['wr']:.1f}% WR • {v['games']} GP"
+
+        e=discord.Embed(title=f"{season['required_prefix']} — Records", color=discord.Color.blurple())
+        e.add_field(name="Most Games", value=(f"`{x['most_games']['username']}` — {x['most_games']['games']} GP" if x["most_games"] else "N/A"), inline=False)
+        e.add_field(name="Best Overall WR", value=line(x["best_wr"]), inline=False)
+        e.add_field(name="Worst Overall WR", value=line(x["worst_wr"]), inline=False)
+        e.add_field(name="Best Resistance WR", value=line(x["best_res"],"res"), inline=False)
+        e.add_field(name="Best Spy WR", value=line(x["best_spy"],"spy"), inline=False)
+        await interaction.response.send_message(embed=e)
+
+
+async def setup(bot:commands.Bot):
+    await bot.add_cog(Insights(bot))
+    await bot.add_cog(PastSeason(bot))

@@ -411,8 +411,8 @@ class ProAvalonRatingTracker:
             canonical = json.dumps({"room":room_id,"players":[x.casefold() for x in real_players],"winner":data.get("winner"),"missions":data.get("missionHistory"),"votes":data.get("voteHistory")}, sort_keys=True, separators=(",",":"))
             fingerprint = hashlib.sha256(canonical.encode()).hexdigest()
             for sid, season in state["seasons"].items():
-                inserted = await save_match(season_id=sid,fingerprint=fingerprint,room_id=room_id,detected_at=state["detected_at"],winner=data.get("winner"),game_mode=(self._games.get(room_id) or {}).get("gameMode"),mission_history=data.get("missionHistory") or [],fails_history=data.get("numFailsHistory") or [],vote_history=data.get("voteHistory"),players=real_players,roles=roles,rating_changes=changes)
-                if inserted:
+                match_id = await save_match(season_id=sid,fingerprint=fingerprint,room_id=room_id,detected_at=state["detected_at"],winner=data.get("winner"),game_mode=(self._games.get(room_id) or {}).get("gameMode"),mission_history=data.get("missionHistory") or [],fails_history=data.get("numFailsHistory") or [],vote_history=data.get("voteHistory"),players=real_players,roles=roles,rating_changes=changes)
+                if match_id is not None:
                     # Refresh Discord roles immediately after every newly archived
                     # qualifying match. The 15-minute task remains only a backup.
                     role_sync_result = await self._sync_roles_after_match(
@@ -426,6 +426,7 @@ class ProAvalonRatingTracker:
                         role_sync_result,
                         game_duration_seconds=game_duration_seconds,
                         shot_duration_seconds=shot_duration_seconds,
+                        match_id=match_id,
                     )
             self._tracked.pop(room_id, None)
             self._room_rosters.pop(room_id, None)
@@ -505,6 +506,7 @@ class ProAvalonRatingTracker:
         *,
         game_duration_seconds: float | None = None,
         shot_duration_seconds: float | None = None,
+        match_id: int | None = None,
     ):
         if self.bot is None:
             return
@@ -526,7 +528,12 @@ class ProAvalonRatingTracker:
             embed_color = discord.Color.blurple()
 
         embed = discord.Embed(
-            title=f"Community Season {season['season_number']} — Match Result",
+            title=(
+                f"Community Season {season['season_number']} — "
+                f"Match #{match_id} Result"
+                if match_id is not None
+                else f"Community Season {season['season_number']} — Match Result"
+            ),
             description=f"**{winner} Victory**",
             color=embed_color,
         )

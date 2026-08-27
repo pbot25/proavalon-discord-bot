@@ -49,9 +49,19 @@ async def recent_rows(season_id:int, limit:int):
     finally: await db.close()
 
 async def find_match(season_id:int, match_id:int):
+    """Find a match only by its season-local public match ID."""
     db=await connect()
     try:
-        cur=await db.execute("SELECT * FROM season_matches WHERE community_season_id=? AND (id=? OR room_id=?) ORDER BY id DESC LIMIT 1",(season_id,match_id,match_id))
+        cur=await db.execute(
+            """
+            SELECT *
+            FROM season_matches
+            WHERE community_season_id=?
+              AND season_match_id=?
+            LIMIT 1
+            """,
+            (season_id,match_id),
+        )
         return await cur.fetchone()
     finally: await db.close()
 

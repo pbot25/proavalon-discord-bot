@@ -276,6 +276,59 @@ async def _migrate_daily_leaderboard_types(
     )
 
 
+async def _migrate_season_match_ids(
+    database: aiosqlite.Connection,
+) -> None:
+    """
+    Give every archived match a season-local public match ID.
+
+    IDs are 1, 2, 3... independently inside each community season.
+    Existing live/archived seasons are backfilled on deployment in their
+    historical finish order, so the feature applies immediately.
+    """
+    if not await _table_exists(database, "season_matches"):
+        return
+
+    columns = await _table_columns(database, "season_matches")
+    if "season_match_id" not in columns:
+        await database.execute(
+            "ALTER TABLE season_matches ADD COLUMN season_match_id INTEGER"
+        )
+
+    cursor = await database.execute(
+        """
+        SELECT id, community_season_id, season_match_id
+        FROM season_matches
+        ORDER BY community_season_id ASC, finished_at ASC, id ASC
+        """
+    )
+    rows = await cursor.fetchall()
+
+    next_by_season: dict[int, int] = {}
+    for row in rows:
+        season_id = int(row["community_season_id"])
+        next_id = next_by_season.get(season_id, 1)
+
+        # Re-number all rows deterministically. This guarantees a clean,
+        # gap-free 1..N sequence for pre-existing seasons.
+        await database.execute(
+            """
+            UPDATE season_matches
+            SET season_match_id = ?
+            WHERE id = ?
+            """,
+            (next_id, int(row["id"])),
+        )
+        next_by_season[season_id] = next_id + 1
+
+    await database.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS one_match_number_per_season
+        ON season_matches(community_season_id, season_match_id)
+        """
+    )
+
+
 async def initialize_database() -> None:
     database = await connect()
 
@@ -285,6 +338,7 @@ async def initialize_database() -> None:
         )
         await _migrate_daily_leaderboard_types(database)
         await _migrate_account_links_by_season(database)
+        await _migrate_season_match_ids(database)
         await database.executescript(SCHEMA)
         await database.commit()
     finally:
