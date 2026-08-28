@@ -9,6 +9,7 @@ from database.seasons import (
     count_voided_season_players,
     create_season,
     end_active_season,
+    fetch_season_history,
     get_active_season,
     get_season_players,
     get_voided_season_players,
@@ -28,7 +29,6 @@ from database.account_links import (
 )
 
 from utils.permissions import bot_admin_only
-from database.insights import season_rows
 from database.matches import (
     disable_match_channel,
     get_match_config,
@@ -1221,47 +1221,14 @@ class SeasonCommands(
         )
 
         embed.add_field(
+            name="Tracked game size",
+            value=f"{season['tracked_player_count']} players",
+            inline=True,
+        )
+
+        embed.add_field(
             name="Registered players",
             value=f"{player_count:,}",
-            inline=True,
-        )
-
-        archived_matches = await season_rows(season["id"])
-        total_games = len(archived_matches)
-        resistance_wins = sum(
-            1
-            for row in archived_matches
-            if str(row["winner"] or "").casefold().startswith("res")
-        )
-        spy_wins = sum(
-            1
-            for row in archived_matches
-            if str(row["winner"] or "").casefold().startswith("spy")
-        )
-        resistance_wr = (
-            resistance_wins / total_games * 100
-            if total_games
-            else 0.0
-        )
-        spy_wr = (
-            spy_wins / total_games * 100
-            if total_games
-            else 0.0
-        )
-
-        embed.add_field(
-            name="Games played",
-            value=f"{total_games:,}",
-            inline=True,
-        )
-        embed.add_field(
-            name="Resistance",
-            value=f"{resistance_wins:,} wins • {resistance_wr:.1f}% WR",
-            inline=True,
-        )
-        embed.add_field(
-            name="Spies",
-            value=f"{spy_wins:,} wins • {spy_wr:.1f}% WR",
             inline=True,
         )
 
@@ -1547,6 +1514,84 @@ class SeasonCommands(
                 "The account can register again the next time "
                 "`/stats player` is used for it and it meets "
                 "the normal season requirements."
+            ),
+            ephemeral=True,
+        )
+
+    @app_commands.command(
+        name="fetch",
+        description="Backfills this server's active season from another server.",
+    )
+    @app_commands.describe(
+        season_prefix=(
+            "Season prefix to fetch. Defaults to this server's active prefix."
+        ),
+        source_server_id=(
+            "Optional Discord server ID to use when multiple sources exist."
+        ),
+    )
+    @bot_admin_only()
+    async def fetch_season(
+        self,
+        interaction: discord.Interaction,
+        season_prefix: str | None = None,
+        source_server_id: str | None = None,
+    ) -> None:
+        if interaction.guild_id is None:
+            await interaction.response.send_message(
+                "This command can only be used in a server.",
+                ephemeral=True,
+            )
+            return
+
+        parsed_source_id: int | None = None
+        if source_server_id is not None:
+            try:
+                parsed_source_id = int(source_server_id.strip())
+                if parsed_source_id <= 0:
+                    raise ValueError
+            except (TypeError, ValueError):
+                await interaction.response.send_message(
+                    "`source_server_id` must be a valid Discord server ID.",
+                    ephemeral=True,
+                )
+                return
+
+        await interaction.response.defer(ephemeral=True, thinking=True)
+
+        try:
+            result = await fetch_season_history(
+                guild_id=interaction.guild_id,
+                required_prefix=season_prefix,
+                source_guild_id=parsed_source_id,
+            )
+        except (RuntimeError, ValueError) as error:
+            await interaction.followup.send(
+                str(error),
+                ephemeral=True,
+            )
+            return
+        except Exception as error:
+            await interaction.followup.send(
+                (
+                    "Season history could not be fetched because of an "
+                    f"unexpected database error: `{type(error).__name__}`."
+                ),
+                ephemeral=True,
+            )
+            raise
+
+        await interaction.followup.send(
+            (
+                f"**{result['prefix']} history fetched successfully.**\n"
+                f"Matches copied: **{result['copied_matches']}**\n"
+                f"Matches skipped as duplicates: "
+                f"**{result['skipped_matches']}**\n"
+                f"Players newly registered: **{result['players_added']}**\n"
+                f"Destination now contains: "
+                f"**{result['total_matches']} matches** and "
+                f"**{result['total_players']} registered players**\n"
+                f"Source server ID: `{result['source_guild_id']}`"
             ),
             ephemeral=True,
         )
