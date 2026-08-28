@@ -1487,7 +1487,10 @@ class StatsCommands(
 
         embed = discord.Embed(
             title=f"{metrics.username} — Crit Voting Metrics",
-            description=line("All Resistance Roles", metrics.overall),
+            description=(
+                f"**Season Games Played:** {metrics.games_played}\n"
+                + line("All Resistance Roles", metrics.overall)
+            ),
             color=discord.Color.blurple(),
         )
         for role_name in ("VT", "Lover", "Percival", "Merlin"):

@@ -56,6 +56,7 @@ class VotingLine:
 @dataclass
 class PlayerVotingMetrics:
     username: str
+    games_played: int = 0
     overall: VotingLine = field(default_factory=VotingLine)
     by_role: dict[str, VotingLine] = field(default_factory=dict)
 
@@ -292,6 +293,16 @@ async def _season_match_dicts(season_id: int) -> list[dict]:
 async def get_season_voting_metrics(season_id: int) -> dict[str, PlayerVotingMetrics]:
     combined: dict[str, PlayerVotingMetrics] = {}
     for match in await _season_match_dicts(season_id):
+        # Total season games are counted for every appearance, regardless of
+        # alignment. This gives /stats voting useful context for how Crit
+        # Errors are distributed across the player's games.
+        for player in match.get("players") or []:
+            if not isinstance(player, str) or not player.strip():
+                continue
+            key = player.casefold()
+            target = combined.setdefault(key, PlayerVotingMetrics(player))
+            target.games_played += 1
+
         per_match, _ = analyze_match(match)
         for key, item in per_match.items():
             target = combined.setdefault(key, PlayerVotingMetrics(item.username))

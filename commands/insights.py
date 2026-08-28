@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 import discord
 from discord import app_commands
@@ -56,6 +56,167 @@ class Insights(commands.Cog):
         e.add_field(name='Spies',value='\n'.join(f"`{p['username']}` — {p['role'] or 'Unknown'}" for p in spies) or 'N/A',inline=False)
         missions=json.loads(r['mission_history_json']); e.add_field(name='Missions',value=' '.join('✅' if str(x).casefold()=='succeeded' else '❌' for x in missions) or 'N/A',inline=False)
         await interaction.response.send_message(embed=e)
+
+    @app_commands.command(
+        name="current-match",
+        description="Shows qualifying community-season matches currently in progress.",
+    )
+    async def current_match(self, interaction: discord.Interaction):
+        if interaction.guild_id is None:
+            return await interaction.response.send_message(
+                "This command can only be used in a server.", ephemeral=True
+            )
+
+        leaderboard_cog = self.bot.get_cog("LeaderboardCommands")
+        tracker = getattr(leaderboard_cog, "rating_tracker", None)
+        if tracker is None:
+            return await interaction.response.send_message(
+                "The live match tracker is not available right now.",
+                ephemeral=True,
+            )
+
+        await interaction.response.defer(thinking=True)
+        snapshots = await tracker.get_current_match_snapshots(
+            interaction.guild_id
+        )
+
+        if not snapshots:
+            return await interaction.followup.send(
+                "No qualifying community-season match is currently in progress."
+            )
+
+        embeds = []
+        now = datetime.now(timezone.utc)
+
+        for index, snapshot in enumerate(snapshots, 1):
+            room_id = snapshot["room_id"]
+            game = snapshot.get("game") or {}
+            data = snapshot.get("data") or {}
+            players = snapshot.get("players") or []
+            missions = data.get("missionHistory") or game.get("missionHistory") or []
+            fails = data.get("numFailsHistory") or game.get("numFailsHistory") or []
+
+            succeeded = sum(
+                1 for result in missions
+                if str(result).casefold() == "succeeded"
+            )
+            failed = sum(
+                1 for result in missions
+                if str(result).casefold() == "failed"
+            )
+
+            title = "Current Match"
+            if len(snapshots) > 1:
+                title += f" {index}"
+            embed = discord.Embed(
+                title=title,
+                description=f"**In Progress** • Room `{room_id}`",
+                color=discord.Color.blurple(),
+            )
+
+            started_at = snapshot.get("started_at")
+            if started_at is not None:
+                elapsed = max(0, int((now - started_at).total_seconds()))
+                hours, remainder = divmod(elapsed, 3600)
+                minutes, seconds = divmod(remainder, 60)
+                if hours:
+                    elapsed_text = f"{hours}h {minutes}m {seconds}s"
+                elif minutes:
+                    elapsed_text = f"{minutes}m {seconds}s"
+                else:
+                    elapsed_text = f"{seconds}s"
+                embed.add_field(
+                    name="Game Time",
+                    value=f"**{elapsed_text}**",
+                    inline=True,
+                )
+
+            game_mode = game.get("gameMode")
+            if game_mode:
+                embed.add_field(
+                    name="Mode",
+                    value=str(game_mode),
+                    inline=True,
+                )
+
+            embed.add_field(
+                name="Score",
+                value=f"Resistance **{succeeded}** — **{failed}** Spies",
+                inline=True,
+            )
+
+            mission_parts = []
+            for i, result in enumerate(missions):
+                icon = (
+                    "✅" if str(result).casefold() == "succeeded"
+                    else "❌" if str(result).casefold() == "failed"
+                    else "➖"
+                )
+                fail_text = ""
+                if i < len(fails):
+                    try:
+                        count = int(fails[i])
+                    except (TypeError, ValueError):
+                        count = 0
+                    if count > 0:
+                        fail_text = f" ({count}F)"
+                mission_parts.append(f"M{i + 1} {icon}{fail_text}")
+
+            if succeeded < 3 and failed < 3:
+                current_mission = min(5, len(missions) + 1)
+                mission_parts.append(f"**Current: M{current_mission}**")
+
+            embed.add_field(
+                name="Missions",
+                value=" • ".join(mission_parts) if mission_parts else "**Current: M1**",
+                inline=False,
+            )
+
+            if players:
+                embed.add_field(
+                    name=f"Players ({len(players)})",
+                    value="\n".join(f"`{name}`" for name in players)[:1024],
+                    inline=False,
+                )
+
+            # Public card data only; never expose hidden role information.
+            public_data = data.get("publicData") or {}
+            public_cards = public_data.get("cards") or {}
+            ref_history = []
+            if isinstance(public_cards, dict):
+                for card_key, card_data in public_cards.items():
+                    if not isinstance(card_data, dict):
+                        continue
+                    card_name = str(card_data.get("name") or card_key or "")
+                    normalized = (
+                        card_name.replace("_", " ")
+                        .replace("-", " ")
+                        .casefold()
+                    )
+                    if "ref" in normalized and "rain" in normalized:
+                        ref_history = [
+                            str(name)
+                            for name in (card_data.get("history") or [])
+                            if isinstance(name, str) and name.strip()
+                        ]
+                        break
+
+            if ref_history:
+                embed.add_field(
+                    name="Ref of the Rain",
+                    value=(
+                        f"**Current:** `{ref_history[-1]}`\n"
+                        + " → ".join(f"`{name}`" for name in ref_history)
+                    )[:1024],
+                    inline=False,
+                )
+
+            embed.set_footer(
+                text="Live public snapshot • no hidden roles are shown"
+            )
+            embeds.append(embed)
+
+        await interaction.followup.send(embeds=embeds[:10])
 
     @app_commands.command(name='streaks',description='Shows current and longest win/loss streaks.')
     @app_commands.autocomplete(username=player_auto)
@@ -211,9 +372,6 @@ class PastSeason(commands.GroupCog, group_name="past-season", group_description=
         names = {p["username"].casefold(): p["username"] for row in rows for p in unpack(row)}
         res_wins = sum(1 for row in rows if str(row["winner"] or "").casefold().startswith("res"))
         spy_wins = sum(1 for row in rows if str(row["winner"] or "").casefold().startswith("spy"))
-        total_games = len(rows)
-        res_wr = (res_wins / total_games * 100) if total_games else 0.0
-        spy_wr = (spy_wins / total_games * 100) if total_games else 0.0
         status = "Active" if season["is_active"] else "Archived"
 
         e = discord.Embed(
@@ -221,18 +379,10 @@ class PastSeason(commands.GroupCog, group_name="past-season", group_description=
             color=discord.Color.blurple(),
         )
         e.add_field(name="Status", value=status, inline=True)
-        e.add_field(name="Games Played", value=f"{total_games:,}", inline=True)
-        e.add_field(name="Players Seen", value=f"{len(names):,}", inline=True)
-        e.add_field(
-            name="Resistance",
-            value=f"{res_wins:,} wins • {res_wr:.1f}% WR",
-            inline=True,
-        )
-        e.add_field(
-            name="Spies",
-            value=f"{spy_wins:,} wins • {spy_wr:.1f}% WR",
-            inline=True,
-        )
+        e.add_field(name="Matches", value=str(len(rows)), inline=True)
+        e.add_field(name="Players Seen", value=str(len(names)), inline=True)
+        e.add_field(name="Resistance Wins", value=str(res_wins), inline=True)
+        e.add_field(name="Spy Wins", value=str(spy_wins), inline=True)
         e.add_field(name="Started", value=fmt_date(season["started_at"]), inline=True)
         e.add_field(name="Ended", value=fmt_date(season["ended_at"]) if season["ended_at"] else "Still active", inline=True)
         await interaction.response.send_message(embed=e)

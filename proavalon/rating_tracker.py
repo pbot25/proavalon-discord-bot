@@ -44,6 +44,10 @@ class ProAvalonRatingTracker:
         self._current_room = None
         self._last_switch = 0.0
         self._finalizing = set()
+        # Serializes room joins so an on-demand /current-match snapshot cannot
+        # collide with the normal initial/final room inspections.
+        self._room_action_lock = asyncio.Lock()
+        self._snapshot_waiters: dict[int, asyncio.Future] = {}
         # Rooms are inspected only after a game starts, when the 10-player
         # roster is locked. This prevents repeated join/leave spam.
         self._initially_inspected = set()
@@ -137,14 +141,15 @@ class ProAvalonRatingTracker:
 
             if final_room is not None:
                 self._final_visit_started.add(final_room)
-                self._current_room = final_room
-                await self._emit("join-room", final_room)
-                # distributeGameData() is called immediately by ProAvalon
-                # after a successful join-room. Leave enough time for the
-                # room roster and final game-data events to arrive.
-                await asyncio.sleep(1.25)
-                await self._emit("leave-room", "")
-                self._current_room = None
+                async with self._room_action_lock:
+                    self._current_room = final_room
+                    await self._emit("join-room", final_room)
+                    # distributeGameData() is called immediately by ProAvalon
+                    # after a successful join-room. Leave enough time for the
+                    # room roster and final game-data events to arrive.
+                    await asyncio.sleep(1.25)
+                    await self._emit("leave-room", "")
+                    self._current_room = None
                 await asyncio.sleep(0.35)
                 continue
 
@@ -178,11 +183,12 @@ class ProAvalonRatingTracker:
                 # Mark it before joining so a transient event or exception
                 # does not create a rapid join/leave loop.
                 self._initially_inspected.add(initial_room)
-                self._current_room = initial_room
-                await self._emit("join-room", initial_room)
-                await asyncio.sleep(1.25)
-                await self._emit("leave-room", "")
-                self._current_room = None
+                async with self._room_action_lock:
+                    self._current_room = initial_room
+                    await self._emit("join-room", initial_room)
+                    await asyncio.sleep(1.25)
+                    await self._emit("leave-room", "")
+                    self._current_room = None
                 await asyncio.sleep(0.35)
                 continue
 
@@ -361,6 +367,11 @@ class ProAvalonRatingTracker:
         if state is None:
             return
         state["last_data"] = data
+
+        waiter = self._snapshot_waiters.get(room_id)
+        if waiter is not None and not waiter.done():
+            waiter.set_result(data)
+
         if str(data.get("phase", "")).casefold() == "finished" and room_id not in self._finalizing:
             self._finalizing.add(room_id)
             asyncio.create_task(self._finalize_room(room_id))
@@ -436,6 +447,69 @@ class ProAvalonRatingTracker:
             self._assassination_started_at.pop(room_id, None)
         finally:
             self._finalizing.discard(room_id)
+
+    async def get_current_match_snapshots(self, guild_id: int) -> list[dict]:
+        """Return fresh public snapshots for qualifying live matches in a guild.
+
+        The tracker already knows which live rooms belong to each active
+        community season. This method briefly re-enters each live room only
+        when /current-match is requested, so normal operation still avoids
+        repeated join/leave spam.
+        """
+        candidate_rooms: list[int] = []
+        for room_id, state in list(self._tracked.items()):
+            game = self._games.get(room_id) or {}
+            if str(game.get("status") or "").casefold() != "game in progress":
+                continue
+
+            belongs_to_guild = any(
+                int(season.get("guild_id")) == int(guild_id)
+                for season in (state.get("seasons") or {}).values()
+                if season.get("guild_id") is not None
+            )
+            if belongs_to_guild:
+                candidate_rooms.append(int(room_id))
+
+        snapshots: list[dict] = []
+        loop = asyncio.get_running_loop()
+
+        for room_id in sorted(candidate_rooms):
+            state = self._tracked.get(room_id) or {}
+            game = dict(self._games.get(room_id) or {})
+            data = state.get("last_data") or {}
+
+            # Ask ProAvalon for a fresh public game-data payload on demand.
+            if self._websocket is not None:
+                async with self._room_action_lock:
+                    future = loop.create_future()
+                    self._snapshot_waiters[room_id] = future
+                    self._current_room = room_id
+                    try:
+                        await self._emit("join-room", room_id)
+                        try:
+                            data = await asyncio.wait_for(future, timeout=2.5)
+                        except asyncio.TimeoutError:
+                            data = state.get("last_data") or data or {}
+                    finally:
+                        await self._emit("leave-room", "")
+                        self._current_room = None
+                        self._snapshot_waiters.pop(room_id, None)
+
+            players = (
+                self._room_rosters.get(room_id)
+                or data.get("playerUsernamesOrdered")
+                or []
+            )
+
+            snapshots.append({
+                "room_id": room_id,
+                "game": game,
+                "data": data,
+                "players": list(players),
+                "started_at": self._game_started_at.get(room_id),
+            })
+
+        return snapshots
 
     async def _sync_roles_after_match(self, season, players):
         """Immediately reconcile Discord roles after one archived match."""

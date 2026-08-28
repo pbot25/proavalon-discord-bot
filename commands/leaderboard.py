@@ -331,11 +331,13 @@ def sort_entries(
     metric: str,
 ) -> list[LeaderboardEntry]:
     if metric == "crit_errors":
+        # Crit Errors is rate-based so players with different sample sizes are
+        # compared fairly. Lower Crit Error % ranks higher.
         return sorted(
             entries,
             key=lambda entry: (
-                entry.crit_errors,
                 entry.crit_errors / entry.games if entry.games else 999.0,
+                entry.crit_errors,
                 -entry.games,
                 entry.username.casefold(),
             ),
@@ -477,8 +479,9 @@ def build_page_description(
         f"{entry.games:,}"
         for entry in page_entries
     ]
+    games_header = "Votes" if metric in {"crit_accuracy", "crit_errors"} else "GP"
     games_width = max(
-        len("GP"),
+        len(games_header),
         max(len(text) for text in games_texts),
     )
 
@@ -491,10 +494,10 @@ def build_page_description(
             for entry in page_entries
         ]
     elif metric == "crit_errors":
-        metric_header = "Errors"
+        metric_header = "Error %"
         metric_texts = [
-            f"{entry.crit_errors} ({(entry.crit_errors / entry.games * 100):.1f}%)"
-            if entry.games else "0"
+            f"{(entry.crit_errors / entry.games * 100):.1f}% ({entry.crit_errors})"
+            if entry.games else "N/A"
             for entry in page_entries
         ]
     elif metric == "rating":
@@ -633,8 +636,9 @@ def build_daily_table(
         f"{entry.games:,}"
         for entry in entries
     ]
+    games_header = "Votes" if metric in {"crit_accuracy", "crit_errors"} else "GP"
     games_width = max(
-        len("GP"),
+        len(games_header),
         max(len(value) for value in games_texts),
     )
 
@@ -645,10 +649,10 @@ def build_daily_table(
             for entry in entries
         ]
     elif metric == "crit_errors":
-        metric_header = "Errors"
+        metric_header = "Error %"
         metric_texts = [
-            f"{entry.crit_errors} ({(entry.crit_errors / entry.games * 100):.1f}%)"
-            if entry.games else "0"
+            f"{(entry.crit_errors / entry.games * 100):.1f}% ({entry.crit_errors})"
+            if entry.games else "N/A"
             for entry in entries
         ]
     elif metric == "rating":
