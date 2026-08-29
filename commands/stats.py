@@ -1158,6 +1158,52 @@ def build_social_compare_embed(
     return embed
 
 
+
+
+async def resolve_stats_target(
+    interaction: discord.Interaction,
+    season,
+    *,
+    username: str | None = None,
+    discord_user: discord.Member | None = None,
+    default_to_invoker: bool = True,
+) -> tuple[str | None, str | None]:
+    """
+    Resolve either a typed ProAvalon username or a linked Discord @.
+    Returns (username, error_message).
+    """
+    has_username = username is not None and bool(username.strip())
+    if has_username and discord_user is not None:
+        return None, "Choose either `username` or `discord_user`, not both."
+
+    if has_username:
+        return username.strip(), None
+
+    target_member = discord_user
+    if target_member is None and default_to_invoker:
+        target_id = interaction.user.id
+        target_mention = interaction.user.mention
+    elif target_member is not None:
+        target_id = target_member.id
+        target_mention = target_member.mention
+    else:
+        return None, "Provide a username or linked Discord user."
+
+    link = await get_preferred_link_for_discord(
+        interaction.guild_id,
+        target_id,
+        int(season["season_number"]),
+    )
+    if link is None:
+        return (
+            None,
+            f"{target_mention} is not linked to an account for "
+            f"{season_display_name(season)}.",
+        )
+
+    return str(link["proavalon_username"]), None
+
+
 class StatsCommands(
     commands.GroupCog,
     group_name="stats",
@@ -1403,7 +1449,7 @@ class StatsCommands(
                 ),
             )
 
-        if active_season is not None and season_number is not None:
+        if active_season is not None:
             voting = await get_player_voting_metrics(
                 int(active_season["id"]), profile.username
             )
@@ -1432,11 +1478,13 @@ class StatsCommands(
     )
     @app_commands.describe(
         username="ProAvalon username. Leave blank to use your linked account.",
+        discord_user="Linked Discord @ to look up.",
     )
     async def voting(
         self,
         interaction: discord.Interaction,
         username: str | None = None,
+        discord_user: discord.Member | None = None,
     ) -> None:
         if interaction.guild_id is None:
             await interaction.response.send_message(
@@ -1450,20 +1498,18 @@ class StatsCommands(
             )
             return
 
-        clean_username = (username or "").strip()
-        if not clean_username:
-            link = await get_preferred_link_for_discord(
-                interaction.guild_id,
-                interaction.user.id,
-                int(season["season_number"]),
+        clean_username, error = await resolve_stats_target(
+            interaction,
+            season,
+            username=username,
+            discord_user=discord_user,
+        )
+        if error is not None:
+            await interaction.response.send_message(
+                error,
+                ephemeral=True,
             )
-            if link is None:
-                await interaction.response.send_message(
-                    "Link your ProAvalon account or provide a username.",
-                    ephemeral=True,
-                )
-                return
-            clean_username = str(link["proavalon_username"])
+            return
 
         metrics = await get_player_voting_metrics(
             int(season["id"]), clean_username
@@ -1653,6 +1699,7 @@ class StatsCommands(
             "Registered season player. Leave blank to use your linked "
             "active-season account."
         ),
+        discord_user="Linked Discord @ to look up.",
         minimum_games=(
             "Minimum games together/opposite required to appear. Defaults to 1."
         ),
@@ -1664,6 +1711,7 @@ class StatsCommands(
         interaction: discord.Interaction,
         category: app_commands.Choice[str],
         username: str | None = None,
+        discord_user: discord.Member | None = None,
         minimum_games: app_commands.Range[int, 1, 999] = 1,
     ) -> None:
         if interaction.guild_id is None:
@@ -1681,24 +1729,18 @@ class StatsCommands(
             )
             return
 
-        if username is not None and username.strip():
-            requested = username.strip()
-        else:
-            link = await get_preferred_link_for_discord(
-                interaction.guild_id,
-                interaction.user.id,
-                int(season["season_number"]),
+        requested, error = await resolve_stats_target(
+            interaction,
+            season,
+            username=username,
+            discord_user=discord_user,
+        )
+        if error is not None:
+            await interaction.response.send_message(
+                error,
+                ephemeral=True,
             )
-            if link is None:
-                await interaction.response.send_message(
-                    (
-                        "You do not have an account linked for the active "
-                        "season. Provide `username` or use `/account link`."
-                    ),
-                    ephemeral=True,
-                )
-                return
-            requested = str(link["proavalon_username"])
+            return
 
         resolved = await resolve_registered_username(
             season_id=int(season["id"]),
@@ -1707,8 +1749,8 @@ class StatsCommands(
         if resolved is None:
             await interaction.response.send_message(
                 (
-                    f"`{requested}` is not registered for Community Season "
-                    f"{season['season_number']}."
+                    f"`{requested}` is not registered for "
+                    f"{season_display_name(season)}."
                 ),
                 ephemeral=True,
             )
@@ -1836,6 +1878,7 @@ class StatsCommands(
     )
     @app_commands.describe(
         username="Registered season player to analyze.",
+        discord_user="Linked Discord @ to look up.",
     )
     @app_commands.autocomplete(
         username=registered_username_autocomplete,
@@ -1843,7 +1886,8 @@ class StatsCommands(
     async def social(
         self,
         interaction: discord.Interaction,
-        username: str,
+        username: str | None = None,
+        discord_user: discord.Member | None = None,
     ) -> None:
         if interaction.guild_id is None:
             await interaction.response.send_message(
@@ -1860,14 +1904,27 @@ class StatsCommands(
             )
             return
 
+        requested, error = await resolve_stats_target(
+            interaction,
+            season,
+            username=username,
+            discord_user=discord_user,
+        )
+        if error is not None:
+            await interaction.response.send_message(
+                error,
+                ephemeral=True,
+            )
+            return
+
         resolved = await resolve_registered_username(
             season_id=season["id"],
-            requested_username=username.strip(),
+            requested_username=requested,
         )
         if resolved is None:
             await interaction.response.send_message(
                 (
-                    f"`{username.strip()}` is not registered for "
+                    f"`{requested}` is not registered for "
                     f"{season_display_name(season)}."
                 ),
                 ephemeral=True,

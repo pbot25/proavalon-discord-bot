@@ -101,6 +101,7 @@ async def get_season_by_number(
                 guild_id,
                 season_number,
                 required_prefix,
+                display_name,
                 tracked_player_count,
                 started_at,
                 ended_at,
@@ -131,7 +132,7 @@ async def get_season_by_prefix(
         cursor = await database.execute(
             """
             SELECT
-                id, guild_id, season_number, required_prefix,
+                id, guild_id, season_number, required_prefix, display_name,
                 tracked_player_count, started_at, ended_at, is_active
             FROM community_seasons
             WHERE guild_id = ?
@@ -159,6 +160,7 @@ async def get_latest_season(
                 guild_id,
                 season_number,
                 required_prefix,
+                display_name,
                 tracked_player_count,
                 started_at,
                 ended_at,
@@ -171,6 +173,35 @@ async def get_latest_season(
             (_guild_id_text(guild_id),),
         )
 
+        return await cursor.fetchone()
+    finally:
+        await database.close()
+
+
+
+async def get_season_for_username(
+    guild_id: int,
+    proavalon_username: str,
+):
+    """Return the guild season whose configured prefix matches a username."""
+    username = proavalon_username.strip()
+    if not username:
+        return None
+
+    database = await connect()
+    await _ensure_season_display_name_column(database)
+    try:
+        cursor = await database.execute(
+            """
+            SELECT *
+            FROM community_seasons
+            WHERE guild_id = ?
+              AND ? LIKE required_prefix || '%' COLLATE NOCASE
+            ORDER BY LENGTH(required_prefix) DESC, id DESC
+            LIMIT 1
+            """,
+            (_guild_id_text(guild_id), username),
+        )
         return await cursor.fetchone()
     finally:
         await database.close()
@@ -218,7 +249,7 @@ async def create_season(
         existing_cursor = await database.execute(
             """
             SELECT
-                id, guild_id, season_number, required_prefix,
+                id, guild_id, season_number, required_prefix, display_name,
                 tracked_player_count, started_at, ended_at, is_active
             FROM community_seasons
             WHERE guild_id = ?
@@ -258,18 +289,19 @@ async def create_season(
                 """
                 UPDATE community_seasons
                 SET is_active = 1,
-                    ended_at = NULL
+                    ended_at = NULL,
+                    display_name = ?
                 WHERE id = ?
                   AND guild_id = ?
                 """,
-                (existing_season["id"], guild_text),
+                (canonical_name, existing_season["id"], guild_text),
             )
             await database.commit()
 
             reopened_cursor = await database.execute(
                 """
                 SELECT
-                    id, guild_id, season_number, required_prefix,
+                    id, guild_id, season_number, required_prefix, display_name,
                     tracked_player_count, started_at, ended_at, is_active
                 FROM community_seasons
                 WHERE id = ?
@@ -296,6 +328,7 @@ async def create_season(
                 guild_id,
                 season_number,
                 required_prefix,
+                display_name,
                 tracked_player_count,
                 started_at,
                 ended_at,
@@ -316,7 +349,7 @@ async def create_season(
         created_cursor = await database.execute(
             """
             SELECT
-                id, guild_id, season_number, required_prefix,
+                id, guild_id, season_number, required_prefix, display_name,
                 tracked_player_count, started_at, ended_at, is_active
             FROM community_seasons
             WHERE id = ?
@@ -803,7 +836,7 @@ async def get_all_active_seasons():
     database = await connect()
     await _ensure_season_display_name_column(database)
     try:
-        cursor = await database.execute("""SELECT id,guild_id,season_number,required_prefix,tracked_player_count,started_at,ended_at,is_active FROM community_seasons WHERE is_active=1""")
+        cursor = await database.execute("""SELECT id,guild_id,season_number,required_prefix,display_name,tracked_player_count,started_at,ended_at,is_active FROM community_seasons WHERE is_active=1""")
         return await cursor.fetchall()
     finally:
         await database.close()

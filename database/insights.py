@@ -75,14 +75,14 @@ async def registered_usernames(season_id:int):
 async def all_links_for_discord(guild_id:int, discord_id:int):
     db=await connect()
     try:
-        cur=await db.execute("SELECT a.*, c.required_prefix,c.id AS community_season_id,c.started_at,c.ended_at,c.is_active FROM account_links a LEFT JOIN community_seasons c ON c.guild_id=a.guild_id AND c.season_number=a.season_number WHERE a.guild_id=? AND a.discord_user_id=? AND a.is_active=1 ORDER BY c.id ASC,a.linked_at ASC",(str(guild_id),str(discord_id)))
+        cur=await db.execute("SELECT a.*, c.required_prefix,c.display_name,c.id AS community_season_id,c.started_at,c.ended_at,c.is_active FROM account_links a LEFT JOIN community_seasons c ON c.guild_id=a.guild_id AND c.season_number=a.season_number WHERE a.guild_id=? AND a.discord_user_id=? AND a.is_active=1 ORDER BY c.id ASC,a.linked_at ASC",(str(guild_id),str(discord_id)))
         return await cur.fetchall()
     finally: await db.close()
 
 async def link_for_username(guild_id:int, username:str):
     db=await connect()
     try:
-        cur=await db.execute("SELECT a.*,c.required_prefix,c.id AS community_season_id,c.is_active FROM account_links a LEFT JOIN community_seasons c ON c.guild_id=a.guild_id AND c.season_number=a.season_number WHERE a.guild_id=? AND a.proavalon_username=? COLLATE NOCASE AND a.is_active=1 ORDER BY c.is_active DESC,a.linked_at DESC LIMIT 1",(str(guild_id),username))
+        cur=await db.execute("SELECT a.*,c.required_prefix,c.display_name,c.id AS community_season_id,c.is_active FROM account_links a LEFT JOIN community_seasons c ON c.guild_id=a.guild_id AND c.season_number=a.season_number WHERE a.guild_id=? AND a.proavalon_username=? COLLATE NOCASE AND a.is_active=1 ORDER BY c.is_active DESC,a.linked_at DESC LIMIT 1",(str(guild_id),username))
         return await cur.fetchone()
     finally: await db.close()
 

@@ -14,9 +14,15 @@ from database.account_links import (
     get_saved_links_for_discord,
     get_linked_usernames,
     unlink_discord_account,
+    repair_account_link_scopes_for_guild,
 )
 
-from database.seasons import get_active_season, register_season_player
+from database.seasons import (
+    get_active_season,
+    get_season_by_number,
+    get_season_for_username,
+    season_display_name,
+)
 from proavalon.profile_scraper import (
     ProAvalonError,
     ProAvalonLoginError,
@@ -24,7 +30,6 @@ from proavalon.profile_scraper import (
 )
 
 from utils.permissions import bot_admin_only
-from utils.discord_users import resolve_discord_target
 
 async def linked_username_autocomplete(
     interaction: discord.Interaction,
@@ -80,31 +85,40 @@ async def resolve_proavalon_username(
 
 
 
-def infer_link_season_number(
+async def resolve_link_season(
+    guild_id: int,
     username: str,
     active_season,
-) -> int | None:
-    """Choose a persistent season slot for an account link.
+):
+    matched = await get_season_for_username(
+        guild_id,
+        username,
+    )
+    if matched is not None:
+        return matched
 
-    S1..., S2..., etc. usernames are always remembered under that season
-    number, even when a different season is active or no season is active.
-    Non-season usernames use the active season when one exists; otherwise
-    they are stored as a general link.
-    """
-    match = re.match(r"^[sS](\d+)", username.strip())
-    if match:
-        return int(match.group(1))
-
-    if active_season is not None:
-        return int(active_season["season_number"])
-
-    return None
+    # Non-prefixed/general accounts retain the active season scope when one
+    # exists, matching the bot's previous behavior without assuming that a
+    # prefix number equals the internal season number.
+    return active_season
 
 
-def link_scope_text(season_number: int | None) -> str:
+async def link_scope_text(
+    guild_id: int,
+    season_number: int | None,
+) -> str:
     if season_number is None:
-        return "general account link"
-    return f"Season {season_number}"
+        return "General"
+
+    season = await get_season_by_number(
+        guild_id,
+        int(season_number),
+    )
+    if season is not None:
+        return season_display_name(season)
+
+    return f"Archived season scope {season_number}"
+
 
 
 class AccountCommands(
@@ -134,6 +148,9 @@ class AccountCommands(
             )
             return
 
+        await repair_account_link_scopes_for_guild(
+            interaction.guild_id
+        )
         season = await get_active_season(
             interaction.guild_id
         )
@@ -193,9 +210,15 @@ class AccountCommands(
             )
             return
 
-        target_season_number = infer_link_season_number(
+        target_season = await resolve_link_season(
+            interaction.guild_id,
             canonical_username,
             season,
+        )
+        target_season_number = (
+            int(target_season["season_number"])
+            if target_season is not None
+            else None
         )
 
         try:
@@ -205,20 +228,6 @@ class AccountCommands(
                 proavalon_username=canonical_username,
                 season_number=target_season_number,
             )
-
-            # Linking an account for the active season registers it immediately,
-            # even before the player has played a game.
-            if (
-                season is not None
-                and target_season_number == int(season["season_number"])
-                and canonical_username.casefold().startswith(
-                    str(season["required_prefix"]).casefold()
-                )
-            ):
-                await register_season_player(
-                    community_season_id=int(season["id"]),
-                    proavalon_username=canonical_username,
-                )
 
         except (
             DiscordAccountAlreadyLinkedError,
@@ -234,7 +243,7 @@ class AccountCommands(
             (
                 f"Successfully linked `{canonical_username}` "
                 f"to {interaction.user.mention} for "
-                f"**{link_scope_text(target_season_number)}**. "
+                f"**{await link_scope_text(interaction.guild_id, target_season_number)}**. "
                 "Links saved for other seasons are unchanged."
             ),
             ephemeral=True,
@@ -255,6 +264,9 @@ class AccountCommands(
             )
             return
 
+        await repair_account_link_scopes_for_guild(
+            interaction.guild_id
+        )
         season = await get_active_season(interaction.guild_id)
         season_number = (
             int(season["season_number"])
@@ -311,6 +323,9 @@ class AccountCommands(
             )
             return
 
+        await repair_account_link_scopes_for_guild(
+            interaction.guild_id
+        )
         links = await get_saved_links_for_discord(
             interaction.guild_id,
             interaction.user.id,
@@ -332,10 +347,9 @@ class AccountCommands(
         lines = []
         for link in links:
             link_season = link["season_number"]
-            label = (
-                f"Season {link_season}"
-                if link_season is not None
-                else "General"
+            label = await link_scope_text(
+                interaction.guild_id,
+                link_season,
             )
             marker = (
                 " **(active season)**"
@@ -366,17 +380,15 @@ class AdminAccountCommands(
         description="Links a Discord user to a ProAvalon account.",
     )
     @app_commands.describe(
+        discord_user="Discord @",
         proavalon_username="ProAvalon Username",
-        discord_user="Discord @ (if the user is in this server).",
-        discord_user_id="Discord user ID (also works if they left).",
     )
     @bot_admin_only()
     async def admin_link(
         self,
         interaction: discord.Interaction,
+        discord_user: discord.Member,
         proavalon_username: str,
-        discord_user: discord.Member | None = None,
-        discord_user_id: str | None = None,
     ) -> None:
         if interaction.guild_id is None:
             await interaction.response.send_message(
@@ -385,18 +397,9 @@ class AdminAccountCommands(
             )
             return
 
-        try:
-            target_discord_id, target_discord_mention = resolve_discord_target(
-                discord_user,
-                discord_user_id,
-            )
-        except ValueError as error:
-            await interaction.response.send_message(
-                str(error),
-                ephemeral=True,
-            )
-            return
-
+        await repair_account_link_scopes_for_guild(
+            interaction.guild_id
+        )
         season = await get_active_season(
             interaction.guild_id
         )
@@ -456,31 +459,24 @@ class AdminAccountCommands(
             )
             return
 
-        target_season_number = infer_link_season_number(
+        target_season = await resolve_link_season(
+            interaction.guild_id,
             canonical_username,
             season,
+        )
+        target_season_number = (
+            int(target_season["season_number"])
+            if target_season is not None
+            else None
         )
 
         try:
             await create_account_link(
                 guild_id=interaction.guild_id,
-                discord_user_id=target_discord_id,
+                discord_user_id=discord_user.id,
                 proavalon_username=canonical_username,
                 season_number=target_season_number,
             )
-
-            # Admin-created links count as registered immediately too.
-            if (
-                season is not None
-                and target_season_number == int(season["season_number"])
-                and canonical_username.casefold().startswith(
-                    str(season["required_prefix"]).casefold()
-                )
-            ):
-                await register_season_player(
-                    community_season_id=int(season["id"]),
-                    proavalon_username=canonical_username,
-                )
 
         except (
             DiscordAccountAlreadyLinkedError,
@@ -495,8 +491,8 @@ class AdminAccountCommands(
         await interaction.followup.send(
             (
                 f"Successfully linked `{canonical_username}` "
-                f"to {target_discord_mention} (`{target_discord_id}`) for "
-                f"**{link_scope_text(target_season_number)}**. "
+                f"to {discord_user.mention} for "
+                f"**{await link_scope_text(interaction.guild_id, target_season_number)}**. "
                 "Links saved for other seasons are unchanged."
             ),
             ephemeral=True,

@@ -276,6 +276,148 @@ async def _migrate_daily_leaderboard_types(
     )
 
 
+
+async def _migrate_season_display_names(
+    database: aiosqlite.Connection,
+) -> None:
+    """Add the public season display name without resetting old data."""
+    if not await _table_exists(database, "community_seasons"):
+        return
+
+    columns = await _table_columns(database, "community_seasons")
+    if "display_name" not in columns:
+        await database.execute(
+            "ALTER TABLE community_seasons ADD COLUMN display_name TEXT"
+        )
+
+    # Preserve the old visible label for existing seasons until an admin
+    # explicitly renames them. Newly created seasons always require a name.
+    await database.execute(
+        """
+        UPDATE community_seasons
+        SET display_name = 'Community Season ' || season_number
+        WHERE display_name IS NULL
+           OR TRIM(display_name) = ''
+        """
+    )
+
+
+async def _repair_account_link_season_scopes(
+    database: aiosqlite.Connection,
+) -> None:
+    """
+    Repair links saved under a prefix-derived number (for example S4 -> 4)
+    when season_number is actually an internal per-guild scope key.
+
+    The target season is selected from the guild's configured prefixes,
+    preferring the longest matching prefix.
+    """
+    if not await _table_exists(database, "account_links"):
+        return
+    if not await _table_exists(database, "community_seasons"):
+        return
+
+    seasons_cursor = await database.execute(
+        """
+        SELECT id, guild_id, season_number, required_prefix
+        FROM community_seasons
+        ORDER BY guild_id ASC, LENGTH(required_prefix) DESC, id DESC
+        """
+    )
+    season_rows = await seasons_cursor.fetchall()
+
+    seasons_by_guild: dict[str, list] = {}
+    for row in season_rows:
+        seasons_by_guild.setdefault(str(row["guild_id"]), []).append(row)
+
+    links_cursor = await database.execute(
+        """
+        SELECT *
+        FROM account_links
+        WHERE is_active = 1
+        ORDER BY id ASC
+        """
+    )
+    links = await links_cursor.fetchall()
+
+    for link in links:
+        guild_id = str(link["guild_id"])
+        username = str(link["proavalon_username"] or "").strip()
+        if not username:
+            continue
+
+        target = None
+        lowered = username.casefold()
+        for season in seasons_by_guild.get(guild_id, []):
+            prefix = str(season["required_prefix"] or "").strip()
+            if prefix and lowered.startswith(prefix.casefold()):
+                target = season
+                break
+
+        if target is None:
+            continue
+
+        target_number = int(target["season_number"])
+        current_number = link["season_number"]
+        if current_number is not None and int(current_number) == target_number:
+            continue
+
+        # Do not create an ambiguous active collision. If an identical link
+        # already exists at the correct scope, retire this legacy duplicate.
+        conflict_cursor = await database.execute(
+            """
+            SELECT *
+            FROM account_links
+            WHERE guild_id = ?
+              AND is_active = 1
+              AND id <> ?
+              AND season_number = ?
+              AND (
+                    discord_user_id = ?
+                    OR proavalon_username = ? COLLATE NOCASE
+                  )
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (
+                guild_id,
+                int(link["id"]),
+                target_number,
+                str(link["discord_user_id"]),
+                username,
+            ),
+        )
+        conflict = await conflict_cursor.fetchone()
+
+        if conflict is not None:
+            same_pair = (
+                str(conflict["discord_user_id"]) == str(link["discord_user_id"])
+                and str(conflict["proavalon_username"]).casefold()
+                == username.casefold()
+            )
+            if same_pair:
+                await database.execute(
+                    """
+                    UPDATE account_links
+                    SET is_active = 0, unlinked_at = COALESCE(unlinked_at, linked_at)
+                    WHERE id = ?
+                    """,
+                    (int(link["id"]),),
+                )
+            # If it is a real conflicting mapping, leave it untouched rather
+            # than guessing which user/account should win.
+            continue
+
+        await database.execute(
+            """
+            UPDATE account_links
+            SET season_number = ?
+            WHERE id = ?
+            """,
+            (target_number, int(link["id"])),
+        )
+
+
 async def _migrate_season_match_ids(
     database: aiosqlite.Connection,
 ) -> None:
@@ -338,8 +480,10 @@ async def initialize_database() -> None:
         )
         await _migrate_daily_leaderboard_types(database)
         await _migrate_account_links_by_season(database)
-        await _migrate_season_match_ids(database)
+        await _migrate_season_display_names(database)
         await database.executescript(SCHEMA)
+        await _repair_account_link_season_scopes(database)
+        await _migrate_season_match_ids(database)
         await database.commit()
     finally:
         await database.close()

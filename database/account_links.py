@@ -102,11 +102,139 @@ async def _get_active_link_for_username_scope(
         await database.close()
 
 
+
+
+async def repair_account_link_scopes_for_guild(
+    guild_id: int,
+) -> int:
+    """
+    Repair active account links to the configured season prefix in this guild.
+    Returns the number of rows changed or retired as duplicate legacy links.
+    """
+    guild_text = _guild_id_text(guild_id)
+    database = await connect()
+    changed = 0
+
+    try:
+        season_cursor = await database.execute(
+            """
+            SELECT id, season_number, required_prefix
+            FROM community_seasons
+            WHERE guild_id = ?
+            ORDER BY LENGTH(required_prefix) DESC, id DESC
+            """,
+            (guild_text,),
+        )
+        seasons = await season_cursor.fetchall()
+        if not seasons:
+            return 0
+
+        link_cursor = await database.execute(
+            """
+            SELECT *
+            FROM account_links
+            WHERE guild_id = ?
+              AND is_active = 1
+            ORDER BY id ASC
+            """,
+            (guild_text,),
+        )
+        links = await link_cursor.fetchall()
+
+        await database.execute("BEGIN")
+
+        for link in links:
+            username = str(link["proavalon_username"] or "").strip()
+            lowered = username.casefold()
+            target = next(
+                (
+                    season
+                    for season in seasons
+                    if str(season["required_prefix"] or "").strip()
+                    and lowered.startswith(
+                        str(season["required_prefix"]).strip().casefold()
+                    )
+                ),
+                None,
+            )
+            if target is None:
+                continue
+
+            target_number = int(target["season_number"])
+            current_number = link["season_number"]
+            if current_number is not None and int(current_number) == target_number:
+                continue
+
+            conflict_cursor = await database.execute(
+                """
+                SELECT *
+                FROM account_links
+                WHERE guild_id = ?
+                  AND is_active = 1
+                  AND id <> ?
+                  AND season_number = ?
+                  AND (
+                        discord_user_id = ?
+                        OR proavalon_username = ? COLLATE NOCASE
+                      )
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (
+                    guild_text,
+                    int(link["id"]),
+                    target_number,
+                    str(link["discord_user_id"]),
+                    username,
+                ),
+            )
+            conflict = await conflict_cursor.fetchone()
+
+            if conflict is not None:
+                same_pair = (
+                    str(conflict["discord_user_id"])
+                    == str(link["discord_user_id"])
+                    and str(conflict["proavalon_username"]).casefold()
+                    == username.casefold()
+                )
+                if same_pair:
+                    await database.execute(
+                        """
+                        UPDATE account_links
+                        SET is_active = 0,
+                            unlinked_at = COALESCE(unlinked_at, linked_at)
+                        WHERE id = ?
+                        """,
+                        (int(link["id"]),),
+                    )
+                    changed += 1
+                continue
+
+            await database.execute(
+                """
+                UPDATE account_links
+                SET season_number = ?
+                WHERE id = ?
+                """,
+                (target_number, int(link["id"])),
+            )
+            changed += 1
+
+        await database.commit()
+        return changed
+
+    except Exception:
+        await database.rollback()
+        raise
+    finally:
+        await database.close()
+
 async def get_active_link_for_discord(
     guild_id: int,
     discord_user_id: int,
     season_number: int | None = None,
 ):
+    await repair_account_link_scopes_for_guild(guild_id)
     """
     Return a saved active link.
 
@@ -155,6 +283,7 @@ async def get_preferred_link_for_discord(
     discord_user_id: int,
     season_number: int | None,
 ):
+    await repair_account_link_scopes_for_guild(guild_id)
     """Prefer the active season's saved link, then fall back to latest."""
     if season_number is not None:
         seasonal = await get_active_link_for_discord(
@@ -217,6 +346,7 @@ async def get_saved_links_for_discord(
     guild_id: int,
     discord_user_id: int,
 ):
+    await repair_account_link_scopes_for_guild(guild_id)
     database = await connect()
     try:
         cursor = await database.execute(
@@ -255,6 +385,7 @@ async def create_account_link(
     proavalon_username: str,
     season_number: int | None = None,
 ) -> None:
+    await repair_account_link_scopes_for_guild(guild_id)
     """
     Save a link for a specific season without removing links from other seasons.
 
@@ -373,6 +504,7 @@ async def unlink_discord_account(
     discord_user_id: int,
     season_number: int | None = None,
 ):
+    await repair_account_link_scopes_for_guild(guild_id)
     link = await _get_active_link_for_discord_scope(
         guild_id,
         discord_user_id,
@@ -438,43 +570,9 @@ async def get_registered_players_with_links(
     guild_id: int,
     community_season_id: int,
 ):
+    await repair_account_link_scopes_for_guild(guild_id)
     database = await connect()
     try:
-        # Backfill season_players from already-saved account links. This makes
-        # /season registered-players include linked users with 0 games, including
-        # links created before this fix. Explicitly voided usernames stay excluded.
-        await database.execute(
-            """
-            INSERT OR IGNORE INTO season_players (
-                community_season_id,
-                proavalon_username,
-                first_seen_at,
-                last_seen_at
-            )
-            SELECT
-                community_seasons.id,
-                account_links.proavalon_username,
-                account_links.linked_at,
-                account_links.linked_at
-            FROM community_seasons
-            INNER JOIN account_links
-                ON account_links.guild_id = community_seasons.guild_id
-               AND account_links.season_number = community_seasons.season_number
-               AND account_links.is_active = 1
-            LEFT JOIN season_voided_players
-                ON season_voided_players.community_season_id = community_seasons.id
-               AND season_voided_players.proavalon_username =
-                    account_links.proavalon_username COLLATE NOCASE
-            WHERE community_seasons.id = ?
-              AND community_seasons.guild_id = ?
-              AND season_voided_players.id IS NULL
-              AND account_links.proavalon_username LIKE
-                    community_seasons.required_prefix || '%' COLLATE NOCASE
-            """,
-            (community_season_id, _guild_id_text(guild_id)),
-        )
-        await database.commit()
-
         cursor = await database.execute(
             """
             SELECT

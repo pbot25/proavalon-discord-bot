@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS community_seasons (
     guild_id TEXT NOT NULL,
     season_number INTEGER NOT NULL,
     required_prefix TEXT NOT NULL,
+    display_name TEXT,
     tracked_player_count INTEGER NOT NULL DEFAULT 10,
     started_at TEXT NOT NULL,
     ended_at TEXT,

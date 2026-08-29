@@ -1492,8 +1492,7 @@ class SeasonCommands(
         await interaction.response.send_message(
             (
                 f"`{removed['proavalon_username']}` is no longer "
-                f"voided from Community Season "
-                f"{season['season_number']}.\n"
+                f"voided from {season_display_name(season)}.\n"
                 "The account can register again the next time "
                 "`/stats player` is used for it and it meets "
                 "the normal season requirements."
