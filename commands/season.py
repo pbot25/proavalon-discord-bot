@@ -10,6 +10,8 @@ from database.seasons import (
     create_season,
     end_active_season,
     fetch_season_history,
+    rename_active_season,
+    season_display_name,
     get_active_season,
     get_season_players,
     get_voided_season_players,
@@ -237,13 +239,13 @@ class EndSeasonView(discord.ui.View):
     def __init__(
         self,
         requesting_user_id: int,
-        season_number: int,
+        season_name: str,
         guild_id: int,
     ) -> None:
         super().__init__(timeout=60)
 
         self.requesting_user_id = requesting_user_id
-        self.season_number = season_number
+        self.season_name = season_name
         self.guild_id = guild_id
 
     async def interaction_check(
@@ -285,7 +287,7 @@ class EndSeasonView(discord.ui.View):
 
         await interaction.response.edit_message(
             content=(
-                f"Community Season {season['season_number']} "
+                f"{season_display_name(season)} "
                 "has ended.\n"
                 "Its registered player list remains archived.\n"
                 "Daily leaderboard and automatic match posting "
@@ -439,13 +441,13 @@ class RegisteredPlayersView(discord.ui.View):
         self,
         *,
         players,
-        season_number: int,
+        season_name: str,
         requesting_user_id: int,
     ) -> None:
         super().__init__(timeout=180)
 
         self.players = players
-        self.season_number = season_number
+        self.season_name = season_name
         self.requesting_user_id = requesting_user_id
 
         self.page = 0
@@ -662,13 +664,13 @@ class SeasonVoidListView(discord.ui.View):
         self,
         *,
         players,
-        season_number: int,
+        season_name: str,
         requesting_user_id: int,
     ) -> None:
         super().__init__(timeout=180)
 
         self.players = players
-        self.season_number = season_number
+        self.season_name = season_name
         self.requesting_user_id = requesting_user_id
 
         self.page = 0
@@ -1210,7 +1212,7 @@ class SeasonCommands(
         )
 
         embed = discord.Embed(
-            title=f"Community Season {season['season_number']}",
+            title=f"{season_display_name(season)}",
             color=discord.Color.blurple(),
         )
 
@@ -1285,16 +1287,14 @@ class SeasonCommands(
             await interaction.response.send_message(
                 (
                     f"No players are currently registered for "
-                    f"Community Season {season['season_number']}."
+                    f"{season_display_name(season)}."
                 )
             )
             return
 
         view = RegisteredPlayersView(
             players=players,
-            season_number=int(
-                season["season_number"]
-            ),
+            season_name=season_display_name(season),
             requesting_user_id=interaction.user.id,
         )
 
@@ -1345,9 +1345,7 @@ class SeasonCommands(
 
         view = SeasonVoidListView(
             players=voided_players,
-            season_number=int(
-                season["season_number"]
-            ),
+            season_name=season_display_name(season),
             requesting_user_id=interaction.user.id,
         )
 
@@ -1601,13 +1599,15 @@ class SeasonCommands(
         description="Starts a new 10-player community season.",
     )
     @app_commands.describe(
-        prefix="Required account prefix, such as S1, r1, or ABC.",
+        prefix="Required account prefix, such as S4, r1, or ABC.",
+        name="Required display name, such as Community Season 4.",
     )
     @bot_admin_only()
     async def set_season(
         self,
         interaction: discord.Interaction,
         prefix: str,
+        name: str,
     ) -> None:
         if interaction.guild_id is None:
             await interaction.response.send_message(
@@ -1636,6 +1636,7 @@ class SeasonCommands(
             season = await create_season(
                 interaction.guild_id,
                 clean_prefix,
+                name,
             )
         except (RuntimeError, ValueError) as error:
             await interaction.response.send_message(
@@ -1646,13 +1647,60 @@ class SeasonCommands(
 
         await interaction.response.send_message(
             (
-                f"Community Season {season['season_number']} "
+                f"{season_display_name(season)} "
                 "is now active.\n"
                 f"Only ProAvalon usernames beginning with "
                 f"`{season['required_prefix']}` are eligible.\n"
                 "Eligible accounts must have at least one "
                 "10-player game."
             )
+        )
+
+    @app_commands.command(
+        name="rename",
+        description="Changes the display name of the active community season.",
+    )
+    @app_commands.describe(
+        name="New required display name for the active season.",
+    )
+    @bot_admin_only()
+    async def rename_season(
+        self,
+        interaction: discord.Interaction,
+        name: str,
+    ) -> None:
+        if interaction.guild_id is None:
+            await interaction.response.send_message(
+                "This command can only be used in a server.",
+                ephemeral=True,
+            )
+            return
+
+        try:
+            season = await rename_active_season(
+                interaction.guild_id,
+                name,
+            )
+        except ValueError as error:
+            await interaction.response.send_message(
+                str(error),
+                ephemeral=True,
+            )
+            return
+
+        if season is None:
+            await interaction.response.send_message(
+                "No community season is currently active.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.send_message(
+            (
+                "Season display name changed to "
+                f"**{season_display_name(season)}**."
+            ),
+            ephemeral=True,
         )
 
     @app_commands.command(
@@ -1684,14 +1732,14 @@ class SeasonCommands(
 
         view = EndSeasonView(
             requesting_user_id=interaction.user.id,
-            season_number=season["season_number"],
+            season_name=season_display_name(season),
             guild_id=interaction.guild_id,
         )
 
         await interaction.response.send_message(
             (
                 f"Are you sure you want to end Community "
-                f"Season {season['season_number']}?\n"
+                f"{season_display_name(season)}?\n"
                 "The season and its registered players "
                 "will remain archived."
             ),

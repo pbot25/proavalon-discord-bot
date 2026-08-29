@@ -14,10 +14,51 @@ def _guild_id_text(guild_id: int) -> str:
     return str(guild_id)
 
 
+async def _ensure_season_display_name_column(
+    database,
+) -> None:
+    cursor = await database.execute(
+        "PRAGMA table_info(community_seasons)"
+    )
+    columns = {
+        str(row["name"])
+        for row in await cursor.fetchall()
+    }
+
+    if "display_name" not in columns:
+        await database.execute(
+            "ALTER TABLE community_seasons "
+            "ADD COLUMN display_name TEXT"
+        )
+        # Existing seasons previously displayed as "Community Season N".
+        await database.execute(
+            """
+            UPDATE community_seasons
+            SET display_name = 'Community Season ' || season_number
+            WHERE display_name IS NULL
+               OR TRIM(display_name) = ''
+            """
+        )
+        await database.commit()
+
+
+def season_display_name(season) -> str:
+    try:
+        value = season["display_name"]
+    except (KeyError, IndexError):
+        value = None
+
+    if value is not None and str(value).strip():
+        return str(value).strip()
+
+    return f"Community Season {season['season_number']}"
+
+
 async def get_active_season(
     guild_id: int,
 ):
     database = await connect()
+    await _ensure_season_display_name_column(database)
 
     try:
         cursor = await database.execute(
@@ -27,6 +68,7 @@ async def get_active_season(
                 guild_id,
                 season_number,
                 required_prefix,
+                display_name,
                 tracked_player_count,
                 started_at,
                 ended_at,
@@ -49,6 +91,7 @@ async def get_season_by_number(
     season_number: int,
 ):
     database = await connect()
+    await _ensure_season_display_name_column(database)
 
     try:
         cursor = await database.execute(
@@ -83,6 +126,7 @@ async def get_season_by_prefix(
     required_prefix: str,
 ):
     database = await connect()
+    await _ensure_season_display_name_column(database)
     try:
         cursor = await database.execute(
             """
@@ -105,6 +149,7 @@ async def get_latest_season(
     guild_id: int,
 ):
     database = await connect()
+    await _ensure_season_display_name_column(database)
 
     try:
         cursor = await database.execute(
@@ -134,6 +179,7 @@ async def get_latest_season(
 async def create_season(
     guild_id: int,
     required_prefix: str,
+    display_name: str,
 ):
     """
     Create or resume a community season for one Discord guild.
@@ -143,6 +189,12 @@ async def create_season(
     archived account links and existing season data stay compatible.
     """
     canonical_prefix = required_prefix.strip()
+    canonical_name = display_name.strip()
+
+    if not canonical_name or len(canonical_name) > 100:
+        raise ValueError(
+            "Season name must be between 1 and 100 characters."
+        )
 
     if (
         not canonical_prefix
@@ -160,6 +212,7 @@ async def create_season(
         raise RuntimeError("End the current season first.")
 
     database = await connect()
+    await _ensure_season_display_name_column(database)
 
     try:
         existing_cursor = await database.execute(
@@ -248,12 +301,13 @@ async def create_season(
                 ended_at,
                 is_active
             )
-            VALUES (?, ?, ?, 10, ?, NULL, 1)
+            VALUES (?, ?, ?, ?, 10, ?, NULL, 1)
             """,
             (
                 guild_text,
                 internal_number,
                 canonical_prefix,
+                canonical_name,
                 utc_now(),
             ),
         )
@@ -284,6 +338,7 @@ async def end_active_season(
         return None
 
     database = await connect()
+    await _ensure_season_display_name_column(database)
 
     try:
         now = utc_now()
@@ -334,6 +389,7 @@ async def is_season_player_voided(
     proavalon_username: str,
 ) -> bool:
     database = await connect()
+    await _ensure_season_display_name_column(database)
 
     try:
         cursor = await database.execute(
@@ -380,6 +436,7 @@ async def void_season_player(
         )
 
     database = await connect()
+    await _ensure_season_display_name_column(database)
 
     try:
         await database.execute("BEGIN")
@@ -461,6 +518,7 @@ async def unvoid_season_player(
     """
 
     database = await connect()
+    await _ensure_season_display_name_column(database)
 
     try:
         cursor = await database.execute(
@@ -506,6 +564,7 @@ async def get_voided_season_players(
     community_season_id: int,
 ):
     database = await connect()
+    await _ensure_season_display_name_column(database)
 
     try:
         cursor = await database.execute(
@@ -533,6 +592,7 @@ async def count_voided_season_players(
     community_season_id: int,
 ) -> int:
     database = await connect()
+    await _ensure_season_display_name_column(database)
 
     try:
         cursor = await database.execute(
@@ -578,6 +638,7 @@ async def register_season_player(
 
     timestamp = utc_now()
     database = await connect()
+    await _ensure_season_display_name_column(database)
 
     try:
         await database.execute(
@@ -619,6 +680,7 @@ async def count_season_players(
     community_season_id: int,
 ) -> int:
     database = await connect()
+    await _ensure_season_display_name_column(database)
 
     try:
         cursor = await database.execute(
@@ -640,6 +702,7 @@ async def get_season_players(
     community_season_id: int,
 ):
     database = await connect()
+    await _ensure_season_display_name_column(database)
 
     try:
         cursor = await database.execute(
@@ -674,6 +737,7 @@ async def reset_all_season_data(
 
     guild_text = _guild_id_text(guild_id)
     database = await connect()
+    await _ensure_season_display_name_column(database)
 
     try:
         await database.execute("BEGIN")
@@ -737,6 +801,7 @@ async def reset_all_season_data(
 
 async def get_all_active_seasons():
     database = await connect()
+    await _ensure_season_display_name_column(database)
     try:
         cursor = await database.execute("""SELECT id,guild_id,season_number,required_prefix,tracked_player_count,started_at,ended_at,is_active FROM community_seasons WHERE is_active=1""")
         return await cursor.fetchall()
@@ -761,6 +826,7 @@ async def fetch_season_history(
     """
     guild_text = _guild_id_text(guild_id)
     database = await connect()
+    await _ensure_season_display_name_column(database)
 
     try:
         await database.execute("BEGIN")
@@ -1060,5 +1126,56 @@ async def fetch_season_history(
     except Exception:
         await database.rollback()
         raise
+    finally:
+        await database.close()
+
+
+async def rename_active_season(
+    guild_id: int,
+    display_name: str,
+):
+    canonical_name = display_name.strip()
+    if not canonical_name or len(canonical_name) > 100:
+        raise ValueError(
+            "Season name must be between 1 and 100 characters."
+        )
+
+    database = await connect()
+    await _ensure_season_display_name_column(database)
+
+    try:
+        cursor = await database.execute(
+            """
+            SELECT id
+            FROM community_seasons
+            WHERE guild_id = ?
+              AND is_active = 1
+            LIMIT 1
+            """,
+            (_guild_id_text(guild_id),),
+        )
+        season = await cursor.fetchone()
+        if season is None:
+            return None
+
+        await database.execute(
+            """
+            UPDATE community_seasons
+            SET display_name = ?
+            WHERE id = ?
+            """,
+            (canonical_name, int(season["id"])),
+        )
+        await database.commit()
+
+        cursor = await database.execute(
+            """
+            SELECT *
+            FROM community_seasons
+            WHERE id = ?
+            """,
+            (int(season["id"]),),
+        )
+        return await cursor.fetchone()
     finally:
         await database.close()
