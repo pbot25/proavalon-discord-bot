@@ -496,10 +496,7 @@ class RegisteredPlayersView(discord.ui.View):
         )
 
         embed = discord.Embed(
-            title=(
-                f"Community Season "
-                f"{self.season_number} — Registered Players"
-            ),
+            title=f"{self.season_name} — Registered Players",
             description=build_registered_players_page(
                 players=self.players,
                 page=self.page,
@@ -729,10 +726,7 @@ class SeasonVoidListView(discord.ui.View):
         )
 
         embed = discord.Embed(
-            title=(
-                f"Community Season "
-                f"{self.season_number} — Void List"
-            ),
+            title=f"{self.season_name} — Void List",
             description=description,
             color=discord.Color.red(),
         )
@@ -909,8 +903,7 @@ class SeasonCommands(
         if not matching:
             await interaction.response.send_message(
                 (
-                    f"No registered Community Season "
-                    f"{season['season_number']} players are currently online."
+                    f"No registered players in {season_display_name(season)} are currently online."
                 )
             )
             return
@@ -925,8 +918,7 @@ class SeasonCommands(
 
         view = RosterStatusView(
             title=(
-                f"Community Season "
-                f"{season['season_number']} — Online Players"
+                f"{season_display_name(season)} — Online Players"
             ),
             lines=lines,
             footer_label="online season player(s)",
@@ -1152,9 +1144,7 @@ class SeasonCommands(
         if not matching:
             await interaction.followup.send(
                 (
-                    f"No Community Season "
-                    f"{season['season_number']} players are "
-                    f"currently classified as **{rank.name}**."
+                    f"No players in {season_display_name(season)} are currently classified as **{rank.name}**."
                 )
             )
             return
@@ -1169,8 +1159,7 @@ class SeasonCommands(
 
         view = RosterStatusView(
             title=(
-                f"Community Season "
-                f"{season['season_number']} — {rank.name}"
+                f"{season_display_name(season)} — {rank.name}"
             ),
             lines=lines,
             footer_label=f"{rank.name} player(s)",
@@ -1337,8 +1326,7 @@ class SeasonCommands(
             await interaction.response.send_message(
                 (
                     f"No players are currently voided from "
-                    f"Community Season "
-                    f"{season['season_number']}."
+                    f"{season_display_name(season)}."
                 )
             )
             return
@@ -1431,8 +1419,7 @@ class SeasonCommands(
             await interaction.response.send_message(
                 (
                     f"`{clean_username}` is already voided from "
-                    f"Community Season "
-                    f"{season['season_number']}."
+                    f"{season_display_name(season)}."
                 ),
                 ephemeral=True,
             )
@@ -1441,8 +1428,7 @@ class SeasonCommands(
         await interaction.response.send_message(
             (
                 f"`{clean_username}` has been voided from "
-                f"Community Season "
-                f"{season['season_number']}.\n"
+                f"{season_display_name(season)}.\n"
                 "It has been removed from the registered-player "
                 "roster and will not be automatically registered "
                 "by `/stats player` while it remains voided."
@@ -1497,8 +1483,7 @@ class SeasonCommands(
             await interaction.response.send_message(
                 (
                     f"`{clean_username}` is not voided from "
-                    f"Community Season "
-                    f"{season['season_number']}."
+                    f"{season_display_name(season)}."
                 ),
                 ephemeral=True,
             )

@@ -21,6 +21,7 @@ from database.seasons import (
     get_season_players,
     is_season_player_voided,
     register_season_player,
+    season_display_name,
 )
 from utils.discord_users import parse_discord_user_id
 from proavalon.profile_scraper import (
@@ -393,7 +394,7 @@ def build_profile_embed(
     profile: PlayerProfile,
     cache_hit: bool,
     tracked_player_count: int,
-    season_number: int | None,
+    season_name: str | None,
     numeric_rating: int | None = None,
     rating_updated_at: str | None = None,
     live_rating_bracket: str | None = None,
@@ -411,14 +412,14 @@ def build_profile_embed(
 
     total_games = overall_wins + overall_losses
 
-    if season_number is None:
+    if season_name is None:
         description = (
             f"Statistics for `{profile.username}`. "
             f"Only {tracked_player_count}-player games are shown."
         )
     else:
         description = (
-            f"Community Season {season_number} statistics for "
+            f"{season_name} statistics for "
             f"`{profile.username}`. "
             f"Only {tracked_player_count}-player games are counted."
         )
@@ -894,7 +895,7 @@ def social_record_line(
 
 def build_social_embed(
     *,
-    season_number: int,
+    season_name: str,
     stats: dict,
 ) -> discord.Embed:
     embed = discord.Embed(
@@ -902,7 +903,7 @@ def build_social_embed(
             f"{stats['username']} — Social Stats"
         ),
         description=(
-            f"Community Season {season_number}\n"
+            f"{season_name}\n"
             f"Tracking since **{format_social_date(stats['tracking_since'])}** • "
             f"**{stats['matches_analyzed']} matches analyzed**"
         ),
@@ -1059,7 +1060,7 @@ def build_social_embed(
 
 def build_social_compare_embed(
     *,
-    season_number: int,
+    season_name: str,
     stats: dict,
 ) -> discord.Embed:
     p1 = stats["player_one"]
@@ -1068,7 +1069,7 @@ def build_social_compare_embed(
     embed = discord.Embed(
         title=f"{p1} + {p2} — Social Comparison",
         description=(
-            f"Community Season {season_number}\n"
+            f"{season_name}\n"
             f"Tracking since **{format_social_date(stats['tracking_since'])}** • "
             f"**{stats['shared_games']} shared matches**"
         ),
@@ -1321,7 +1322,7 @@ class StatsCommands(
         # voided from that season is blocked from /stats player in this
         # server until an administrator unvoids it.
         tracked_player_count = DEFAULT_TRACKED_PLAYER_COUNT
-        season_number = None
+        season_name = None
 
         if active_season is not None:
             if await is_season_player_voided(
@@ -1331,8 +1332,7 @@ class StatsCommands(
                 await interaction.followup.send(
                     (
                         f"`{profile.username}` has been voided from "
-                        f"Community Season "
-                        f"{active_season['season_number']} and cannot "
+                        f"{season_display_name(active_season)} and cannot "
                         "be viewed with `/stats player` in this server "
                         "while that season is active."
                     ),
@@ -1375,9 +1375,7 @@ class StatsCommands(
                         tracked_player_count = (
                             season_player_count
                         )
-                        season_number = int(
-                            active_season["season_number"]
-                        )
+                        season_name = season_display_name(active_season)
 
         rating_snapshot = get_cached_rating(
             profile.username
@@ -1387,7 +1385,7 @@ class StatsCommands(
                 profile=profile,
                 cache_hit=cache_hit,
                 tracked_player_count=tracked_player_count,
-                season_number=season_number,
+                season_name=season_name,
                 numeric_rating=(
                     rating_snapshot.rating
                     if rating_snapshot is not None
@@ -1568,7 +1566,7 @@ class StatsCommands(
                 await interaction.response.send_message(
                     (
                         f"`{requested_username}` is not registered for "
-                        f"Community Season {season['season_number']}."
+                        f"{season_display_name(season)}."
                     ),
                     ephemeral=True,
                 )
@@ -1825,7 +1823,7 @@ class StatsCommands(
         )
         embed.set_footer(
             text=(
-                f"Community Season {season['season_number']} • "
+                f"{season_display_name(season)} • "
                 f"Minimum: {minimum} game(s) • Top 10"
             )
         )
@@ -1870,7 +1868,7 @@ class StatsCommands(
             await interaction.response.send_message(
                 (
                     f"`{username.strip()}` is not registered for "
-                    f"Community Season {season['season_number']}."
+                    f"{season_display_name(season)}."
                 ),
                 ephemeral=True,
             )
@@ -1889,7 +1887,7 @@ class StatsCommands(
             await interaction.followup.send(
                 (
                     f"No archived match history has been recorded yet for "
-                    f"`{resolved}` in Community Season {season['season_number']}."
+                    f"`{resolved}` in {season_display_name(season)}."
                 ),
                 ephemeral=True,
             )
@@ -1897,7 +1895,7 @@ class StatsCommands(
 
         await interaction.followup.send(
             embed=build_social_embed(
-                season_number=int(season["season_number"]),
+                season_name=season_display_name(season),
                 stats=stats,
             )
         )
@@ -1945,7 +1943,7 @@ class StatsCommands(
                 await interaction.response.send_message(
                     (
                         f"`{requested.strip()}` is not registered for "
-                        f"Community Season {season['season_number']}."
+                        f"{season_display_name(season)}."
                     ),
                     ephemeral=True,
                 )
@@ -1980,7 +1978,7 @@ class StatsCommands(
 
         await interaction.followup.send(
             embed=build_social_compare_embed(
-                season_number=int(season["season_number"]),
+                season_name=season_display_name(season),
                 stats=stats,
             )
         )

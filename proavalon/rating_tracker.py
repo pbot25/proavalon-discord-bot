@@ -20,6 +20,7 @@ from database.ratings import (
 )
 from database.discord_roles import get_active_season_linked_users
 from database.seasons import (
+    season_display_name,
     get_all_active_seasons,
     register_season_player,
 )
@@ -604,10 +605,10 @@ class ProAvalonRatingTracker:
 
         embed = discord.Embed(
             title=(
-                f"Community Season {season['season_number']} — "
+                f"{season_display_name(season)} — "
                 f"Match #{match_id} Result"
                 if match_id is not None
-                else f"Community Season {season['season_number']} — Match Result"
+                else f"{season_display_name(season)} — Match Result"
             ),
             description=f"**{winner} Victory**",
             color=embed_color,

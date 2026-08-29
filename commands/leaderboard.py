@@ -14,6 +14,7 @@ from database.voting_metrics import get_season_voting_metrics
 from database.seasons import (
     get_active_season,
     get_season_players,
+    season_display_name,
 )
 from database.settings import (
     disable_daily_leaderboard,
@@ -771,7 +772,7 @@ def build_daily_table(
 
 def build_daily_embed(
     *,
-    season_number: int,
+    season_name: str,
     entries: list[LeaderboardEntry],
     metric: str,
     minimum_games: int,
@@ -787,8 +788,7 @@ def build_daily_embed(
 
     embed = discord.Embed(
         title=(
-            f"Community Season {season_number} — "
-            f"Daily {display_name}"
+            f"{season_name} — Daily {display_name}"
         ),
         description=description,
         color=discord.Color.blurple(),
@@ -811,7 +811,7 @@ class LeaderboardView(discord.ui.View):
         self,
         *,
         entries: list[LeaderboardEntry],
-        season_number: int,
+        season_name: str,
         metric: str,
         minimum_games: int,
         requested_limit: int | None,
@@ -825,7 +825,7 @@ class LeaderboardView(discord.ui.View):
         super().__init__(timeout=180)
 
         self.entries = entries
-        self.season_number = season_number
+        self.season_name = season_name
         self.metric = metric
         self.minimum_games = minimum_games
         self.requested_limit = requested_limit
@@ -886,8 +886,7 @@ class LeaderboardView(discord.ui.View):
 
         embed = discord.Embed(
             title=(
-                f"Community Season {self.season_number} — "
-                f"{display_name}"
+                f"{self.season_name} — {display_name}"
             ),
             description=build_page_description(
                 entries=self.entries,
@@ -1365,7 +1364,7 @@ class LeaderboardCommands(commands.Cog):
             await interaction.response.send_message(
                 (
                     f"No players are registered for "
-                    f"Community Season {season['season_number']} "
+                    f"{season_display_name(season)} "
                     "in this server."
                 ),
                 ephemeral=True,
@@ -1404,7 +1403,7 @@ class LeaderboardCommands(commands.Cog):
             displayed_entries = entries if players_shown is None else entries[:players_shown]
             view = LeaderboardView(
                 entries=displayed_entries,
-                season_number=int(season["season_number"]),
+                season_name=season_display_name(season),
                 metric=statistic.value,
                 minimum_games=effective_minimum,
                 requested_limit=players_shown,
@@ -1449,9 +1448,7 @@ class LeaderboardCommands(commands.Cog):
 
         view = LeaderboardView(
             entries=displayed_entries,
-            season_number=int(
-                season["season_number"]
-            ),
+            season_name=season_display_name(season),
             metric=statistic.value,
             minimum_games=minimum_games,
             requested_limit=players_shown,
@@ -1530,7 +1527,7 @@ class LeaderboardCommands(commands.Cog):
         await interaction.followup.send(
             (
                 f"Leaderboard cache refreshed for "
-                f"Community Season {season['season_number']}.\n"
+                f"{season_display_name(season)}.\n"
                 f"Successfully refreshed: {refreshed_count}\n"
                 f"Failed: {failed_count}\n"
                 f"Cached profiles: {len(profiles)}\n"
@@ -2029,9 +2026,7 @@ class DailyLeaderboardCommands(
         )
 
         embed = build_daily_embed(
-            season_number=int(
-                season["season_number"]
-            ),
+            season_name=season_display_name(season),
             entries=entries,
             metric=metric,
             minimum_games=minimum_games,
