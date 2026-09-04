@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 import discord
 from discord import app_commands
@@ -92,6 +92,131 @@ class Insights(commands.Cog):
         e.add_field(name='Spies',value='\n'.join(f"`{p['username']}` — {p['role'] or 'Unknown'}" for p in spies) or 'N/A',inline=False)
         missions=json.loads(r['mission_history_json']); e.add_field(name='Missions',value=' '.join('✅' if str(x).casefold()=='succeeded' else '❌' for x in missions) or 'N/A',inline=False)
         await interaction.response.send_message(embed=e)
+
+    @app_commands.command(
+        name="current-match",
+        description="Shows qualifying community-season matches currently in progress.",
+    )
+    async def current_match(self, interaction: discord.Interaction):
+        if interaction.guild_id is None:
+            return await interaction.response.send_message(
+                "This command can only be used in a server.", ephemeral=True
+            )
+
+        leaderboard_cog = self.bot.get_cog("LeaderboardCommands")
+        tracker = getattr(leaderboard_cog, "rating_tracker", None)
+        if tracker is None:
+            return await interaction.response.send_message(
+                "The live match tracker is not available right now.",
+                ephemeral=True,
+            )
+
+        await interaction.response.defer(thinking=True)
+        snapshots = await tracker.get_current_match_snapshots(
+            interaction.guild_id
+        )
+        if not snapshots:
+            return await interaction.followup.send(
+                "No qualifying community-season match is currently in progress."
+            )
+
+        embeds = []
+        now = datetime.now(timezone.utc)
+        for index, snapshot in enumerate(snapshots, 1):
+            room_id = snapshot["room_id"]
+            game = snapshot.get("game") or {}
+            data = snapshot.get("data") or {}
+            players = snapshot.get("players") or []
+            missions = data.get("missionHistory") or game.get("missionHistory") or []
+            fails = data.get("numFailsHistory") or game.get("numFailsHistory") or []
+
+            succeeded = sum(
+                str(result).casefold() == "succeeded" for result in missions
+            )
+            failed = sum(
+                str(result).casefold() == "failed" for result in missions
+            )
+            title = "Current Match"
+            if len(snapshots) > 1:
+                title += f" {index}"
+            embed = discord.Embed(
+                title=title,
+                description=f"**In Progress** • Room `{room_id}`",
+                color=discord.Color.blurple(),
+            )
+
+            started_at = snapshot.get("started_at")
+            if started_at is not None:
+                elapsed = max(0, (now - started_at).total_seconds())
+                embed.add_field(
+                    name="Game Time",
+                    value=f"**{tracker._format_duration(elapsed)}**",
+                    inline=True,
+                )
+            if game.get("gameMode"):
+                embed.add_field(
+                    name="Mode", value=str(game["gameMode"]), inline=True
+                )
+            embed.add_field(
+                name="Score",
+                value=f"Resistance **{succeeded}** — **{failed}** Spies",
+                inline=True,
+            )
+
+            mission_parts = []
+            for mission_index, result in enumerate(missions):
+                normalized = str(result).casefold()
+                icon = "✅" if normalized == "succeeded" else "❌" if normalized == "failed" else "➖"
+                try:
+                    fail_count = int(fails[mission_index])
+                except (IndexError, TypeError, ValueError):
+                    fail_count = 0
+                fail_text = f" ({fail_count}F)" if fail_count > 0 else ""
+                mission_parts.append(
+                    f"M{mission_index + 1} {icon}{fail_text}"
+                )
+            if succeeded < 3 and failed < 3:
+                mission_parts.append(f"**Current: M{min(5, len(missions) + 1)}**")
+            embed.add_field(
+                name="Missions",
+                value=" • ".join(mission_parts) if mission_parts else "**Current: M1**",
+                inline=False,
+            )
+            if players:
+                embed.add_field(
+                    name=f"Players ({len(players)})",
+                    value="\n".join(f"`{name}`" for name in players)[:1024],
+                    inline=False,
+                )
+
+            public_cards = ((data.get("publicData") or {}).get("cards") or {})
+            if isinstance(public_cards, dict):
+                for card_key, card_data in public_cards.items():
+                    if not isinstance(card_data, dict):
+                        continue
+                    card_name = str(card_data.get("name") or card_key or "")
+                    normalized = card_name.replace("_", " ").replace("-", " ").casefold()
+                    if "ref" not in normalized or "rain" not in normalized:
+                        continue
+                    history = [
+                        str(name) for name in (card_data.get("history") or [])
+                        if isinstance(name, str) and name.strip()
+                    ]
+                    if history:
+                        embed.add_field(
+                            name="Ref of the Rain",
+                            value=(
+                                f"**Current:** `{history[-1]}`\n"
+                                + " → ".join(f"`{name}`" for name in history)
+                            )[:1024],
+                            inline=False,
+                        )
+                    break
+
+            embed.set_footer(text="Live public snapshot • no hidden roles are shown")
+            embeds.append(embed)
+
+        await interaction.followup.send(embeds=embeds[:10])
 
     @app_commands.command(name='streaks',description='Shows current and longest win/loss streaks.')
     @app_commands.describe(username='ProAvalon username.', discord_user='Linked Discord @ to look up.')

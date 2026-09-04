@@ -471,6 +471,117 @@ async def _migrate_season_match_ids(
     )
 
 
+async def _migrate_match_durations(
+    database: aiosqlite.Connection,
+) -> None:
+    """Add nullable timing fields without inventing values for old matches."""
+    if not await _table_exists(database, "season_matches"):
+        return
+
+    columns = await _table_columns(database, "season_matches")
+    if "game_duration_seconds" not in columns:
+        await database.execute(
+            "ALTER TABLE season_matches "
+            "ADD COLUMN game_duration_seconds REAL"
+        )
+    if "assassination_duration_seconds" not in columns:
+        await database.execute(
+            "ALTER TABLE season_matches "
+            "ADD COLUMN assassination_duration_seconds REAL"
+        )
+
+
+async def _cleanup_redundant_legacy_tables(
+    database: aiosqlite.Connection,
+) -> list[str]:
+    """Drop old global backups only when all rows exist in scoped tables.
+
+    The original global schema had no guild ID, so unmatched rows cannot be
+    assigned safely. Those tables are deliberately retained and reported.
+    """
+    checks = {
+        "legacy_community_seasons": """
+            SELECT COUNT(*) AS missing
+            FROM legacy_community_seasons legacy
+            WHERE NOT EXISTS (
+                SELECT 1 FROM community_seasons current
+                WHERE current.season_number = legacy.season_number
+                  AND current.required_prefix = legacy.required_prefix COLLATE NOCASE
+                  AND current.tracked_player_count = legacy.tracked_player_count
+            )
+        """,
+        "legacy_season_players": """
+            SELECT COUNT(*) AS missing
+            FROM legacy_season_players legacy_player
+            JOIN legacy_community_seasons legacy_season
+              ON legacy_season.id = legacy_player.community_season_id
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM season_players current_player
+                JOIN community_seasons current_season
+                  ON current_season.id = current_player.community_season_id
+                WHERE current_player.proavalon_username =
+                      legacy_player.proavalon_username COLLATE NOCASE
+                  AND current_season.season_number = legacy_season.season_number
+                  AND current_season.required_prefix =
+                      legacy_season.required_prefix COLLATE NOCASE
+            )
+        """,
+        "legacy_account_links": """
+            SELECT COUNT(*) AS missing
+            FROM legacy_account_links legacy
+            WHERE NOT EXISTS (
+                SELECT 1 FROM account_links current
+                WHERE current.discord_user_id = legacy.discord_user_id
+                  AND current.proavalon_username =
+                      legacy.proavalon_username COLLATE NOCASE
+            )
+        """,
+        "legacy_bot_admins": """
+            SELECT COUNT(*) AS missing
+            FROM legacy_bot_admins legacy
+            WHERE NOT EXISTS (
+                SELECT 1 FROM bot_admins current
+                WHERE current.discord_user_id = legacy.discord_user_id
+            )
+        """,
+    }
+
+    existing = [
+        name for name in checks
+        if await _table_exists(database, name)
+    ]
+    if not existing:
+        return []
+
+    unmatched: list[str] = []
+    for table_name in existing:
+        cursor = await database.execute(checks[table_name])
+        row = await cursor.fetchone()
+        if int(row["missing"] or 0) > 0:
+            unmatched.append(table_name)
+
+    # These four tables form one backup set. Drop them together only when the
+    # complete set is redundant, preserving foreign-key relationships.
+    if unmatched:
+        print(
+            "Retaining legacy database backup tables with unmatched data: "
+            + ", ".join(unmatched)
+        )
+        return unmatched
+
+    for table_name in (
+        "legacy_season_players",
+        "legacy_account_links",
+        "legacy_bot_admins",
+        "legacy_community_seasons",
+    ):
+        await database.execute(f"DROP TABLE IF EXISTS {table_name}")
+
+    print("Removed fully migrated legacy database backup tables.")
+    return []
+
+
 async def initialize_database() -> None:
     database = await connect()
 
@@ -481,9 +592,13 @@ async def initialize_database() -> None:
         await _migrate_daily_leaderboard_types(database)
         await _migrate_account_links_by_season(database)
         await _migrate_season_display_names(database)
+        # Columns referenced by newer indexes in SCHEMA must exist before the
+        # full schema script runs against an older production database.
+        await _migrate_season_match_ids(database)
+        await _migrate_match_durations(database)
         await database.executescript(SCHEMA)
         await _repair_account_link_season_scopes(database)
-        await _migrate_season_match_ids(database)
+        await _cleanup_redundant_legacy_tables(database)
         await database.commit()
     finally:
         await database.close()

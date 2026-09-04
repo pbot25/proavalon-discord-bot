@@ -218,6 +218,8 @@ CREATE TABLE IF NOT EXISTS season_matches (
     players_json TEXT NOT NULL,
     roles_json TEXT,
     rating_changes_json TEXT,
+    game_duration_seconds REAL,
+    assassination_duration_seconds REAL,
     posted_at TEXT,
     FOREIGN KEY (community_season_id) REFERENCES community_seasons(id) ON DELETE CASCADE,
     UNIQUE (community_season_id, match_fingerprint)

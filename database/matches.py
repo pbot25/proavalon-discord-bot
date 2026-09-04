@@ -29,7 +29,23 @@ async def disable_match_channel(guild_id:int):
         c=await db.execute("UPDATE season_match_configs SET enabled=0, updated_at=? WHERE guild_id=? AND enabled=1",(utc_now(),str(guild_id))); await db.commit(); return c.rowcount>0
     finally: await db.close()
 
-async def save_match(*, season_id:int, fingerprint:str, room_id:int, detected_at:str, winner, game_mode, mission_history, fails_history, vote_history, players, roles, rating_changes):
+async def save_match(
+    *,
+    season_id: int,
+    fingerprint: str,
+    room_id: int,
+    detected_at: str,
+    winner,
+    game_mode,
+    mission_history,
+    fails_history,
+    vote_history,
+    players,
+    roles,
+    rating_changes,
+    game_duration_seconds: float | None = None,
+    assassination_duration_seconds: float | None = None,
+):
     """Archive a match and return its season-local public match ID, or None if duplicate."""
     db=await connect()
     try:
@@ -67,8 +83,9 @@ async def save_match(*, season_id:int, fingerprint:str, room_id:int, detected_at
                 community_season_id, season_match_id, match_fingerprint,
                 room_id, detected_at, finished_at, winner, game_mode,
                 mission_history_json, fails_history_json, vote_history_json,
-                players_json, roles_json, rating_changes_json
-            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                players_json, roles_json, rating_changes_json,
+                game_duration_seconds, assassination_duration_seconds
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 season_id, match_id, fingerprint, room_id, detected_at,
@@ -78,6 +95,8 @@ async def save_match(*, season_id:int, fingerprint:str, room_id:int, detected_at
                 json.dumps(players),
                 json.dumps(roles) if roles is not None else None,
                 json.dumps(rating_changes),
+                game_duration_seconds,
+                assassination_duration_seconds,
             ),
         )
         await db.commit()
