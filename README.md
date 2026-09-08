@@ -144,3 +144,12 @@ The bot is designed to run continuously as a hosted Discord service and is curre
 
 Sensitive configuration such as Discord tokens and ProAvalon credentials is provided through environment variables and is not stored in the repository.
 
+### Recorder bridge
+
+Set `RECORDER_BRIDGE_SECRET` to a long random value in Railway to enable the
+authenticated `/recorder/lobbies` endpoint. Give the local recorder the same
+secret and the Railway public domain through `RECORDER_BRIDGE_URL`. Pbot then
+provides pregame roster snapshots without sharing its ProAvalon credentials or
+opening a competing ProAvalon session. The endpoint never returns passwords,
+Discord tokens, ratings, or match-history data.
+

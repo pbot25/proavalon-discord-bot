@@ -53,6 +53,11 @@ class ProAvalonRatingTracker:
         # roster is locked. This prevents repeated join/leave spam.
         self._initially_inspected = set()
         self._final_visit_started = set()
+        # A full public lobby is inspected once while it remains at ten so a
+        # recorder can recognize replacement lobbies before their game starts.
+        self._pregame_inspected = set()
+        self._pregame_rosters = {}
+        self._pregame_probe_room = None
 
         # Timing observed from ProAvalon's global game-list updates. This lets
         # the bot report game duration without needing private database access.
@@ -123,6 +128,15 @@ class ProAvalonRatingTracker:
             # safe if ProAvalon eventually reuses a room ID.
             self._initially_inspected.intersection_update(existing_room_ids)
             self._final_visit_started.intersection_update(existing_room_ids)
+            for room_id in list(self._pregame_inspected):
+                game = self._games.get(room_id)
+                try:
+                    count = int((game or {}).get("numOfPlayersInside", 0))
+                except (TypeError, ValueError):
+                    count = 0
+                if not game or count != 10:
+                    self._pregame_inspected.discard(room_id)
+                    self._pregame_rosters.pop(room_id, None)
 
             # Final snapshots are the priority because finished rooms can be
             # destroyed once everybody leaves.
@@ -190,6 +204,43 @@ class ProAvalonRatingTracker:
                     await asyncio.sleep(1.25)
                     await self._emit("leave-room", "")
                     self._current_room = None
+                await asyncio.sleep(0.35)
+                continue
+
+            # Cache the roster of each full public pregame lobby. This is a
+            # single join/leave per uninterrupted ten-player period, and lets
+            # the external recorder hand off before a replacement game starts.
+            pregame_room = None
+            for room_id, game in self._games.items():
+                if room_id in self._pregame_inspected:
+                    continue
+                status = str(game.get("status") or "").casefold()
+                try:
+                    count = int(game.get("numOfPlayersInside", 0))
+                    maximum = int(game.get("maxNumPlayers", 0))
+                except (TypeError, ValueError):
+                    continue
+                if (
+                    count == 10
+                    and maximum == 10
+                    and not game.get("passwordLocked", False)
+                    and status not in {"game in progress", "finished"}
+                ):
+                    pregame_room = room_id
+                    break
+
+            if pregame_room is not None:
+                self._pregame_inspected.add(pregame_room)
+                async with self._room_action_lock:
+                    self._pregame_probe_room = pregame_room
+                    self._current_room = pregame_room
+                    try:
+                        await self._emit("join-room", pregame_room)
+                        await asyncio.sleep(1.25)
+                        await self._emit("leave-room", "")
+                    finally:
+                        self._pregame_probe_room = None
+                        self._current_room = None
                 await asyncio.sleep(0.35)
                 continue
 
@@ -307,7 +358,10 @@ class ProAvalonRatingTracker:
                             names = [p.get("username") for p in event_data if isinstance(p, dict) and isinstance(p.get("username"), str)]
                             if names:
                                 self._room_rosters[self._current_room] = names
-                                await self._consider_roster(self._current_room, names)
+                                if self._current_room == self._pregame_probe_room:
+                                    self._pregame_rosters[self._current_room] = list(names)
+                                else:
+                                    await self._consider_roster(self._current_room, names)
                         elif event == "game-data" and isinstance(event_data, dict):
                             await self._handle_game_data(event_data)
                 finally:
@@ -316,6 +370,24 @@ class ProAvalonRatingTracker:
                     self._websocket = None
                     self._current_room = None
         raise ConnectionError("ProAvalon closed the live socket.")
+
+    def get_recorder_lobby_snapshot(self) -> list[dict]:
+        """Return the public lobby state needed by an external recorder."""
+        snapshot = []
+        for room_id, game in self._games.items():
+            snapshot.append({
+                "room_id": int(room_id),
+                "status": str(game.get("status") or ""),
+                "player_count": game.get("numOfPlayersInside"),
+                "max_players": game.get("maxNumPlayers"),
+                "password_locked": bool(game.get("passwordLocked", False)),
+                "players": list(
+                    self._pregame_rosters.get(room_id)
+                    or self._room_rosters.get(room_id)
+                    or []
+                ),
+            })
+        return snapshot
 
     async def _consider_roster(self, room_id, names):
         if len(names) != 10:

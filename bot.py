@@ -10,6 +10,7 @@ from proavalon.profile_scraper import (
     ProAvalonLoginError,
     ProAvalonProfileScraper,
 )
+from recorder_bridge import RecorderBridge
 
 
 load_dotenv()
@@ -47,6 +48,7 @@ class ProAvalonBot(commands.Bot):
         self.profile_cache = ProfileCache(
             ttl_seconds=15 * 60,
         )
+        self.recorder_bridge = RecorderBridge(self)
 
     async def setup_hook(self) -> None:
         print("Initializing database...")
@@ -77,6 +79,8 @@ class ProAvalonBot(commands.Bot):
         await self.load_extension("commands.insights")
         await self.load_extension("commands.roles")
 
+        await self.recorder_bridge.start()
+
         synced_commands = await self.tree.sync()
 
         print(
@@ -84,6 +88,8 @@ class ProAvalonBot(commands.Bot):
         )
 
     async def close(self) -> None:
+        print("Closing recorder bridge...")
+        await self.recorder_bridge.close()
         print("Closing ProAvalon scraper...")
         await self.proavalon_scraper.close()
         await super().close()
