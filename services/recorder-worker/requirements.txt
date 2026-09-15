@@ -1,0 +1,4 @@
+aiohttp>=3.12,<4
+certifi>=2026.7.22
+playwright>=1.55,<2
+python-dotenv>=1.1,<2
