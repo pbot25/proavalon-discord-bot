@@ -90,3 +90,7 @@ def encrypt_refresh_token(refresh_token: str) -> str:
     key = required_environment("YOUTUBE_TOKEN_ENCRYPTION_KEY").encode("ascii")
     return Fernet(key).encrypt(refresh_token.encode("utf-8")).decode("ascii")
 
+
+def decrypt_refresh_token(encrypted_refresh_token: str) -> str:
+    key = required_environment("YOUTUBE_TOKEN_ENCRYPTION_KEY").encode("ascii")
+    return Fernet(key).decrypt(encrypted_refresh_token.encode("ascii")).decode("utf-8")

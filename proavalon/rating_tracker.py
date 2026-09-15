@@ -12,7 +12,9 @@ from database.matches import (
     get_previous_player_brackets,
     mark_match_posted,
     save_match,
+    set_recording_status_by_season_match,
 )
+from database.recording_integrations import get_recording_integration
 from database.ratings import (
     get_cached_rating,
     load_rating_cache,
@@ -987,15 +989,27 @@ class ProAvalonRatingTracker:
             )
         if data.get("voteHistory") is None:
             embed.add_field(name="Voting History", value="Vote history was disabled for this match.", inline=False)
+        youtube = await get_recording_integration(int(season["guild_id"]), "youtube")
+        if youtube and youtube["enabled"] and match_id is not None:
+            embed.add_field(
+                name="Recording",
+                value="Processing and uploading to YouTube…",
+                inline=False,
+            )
+            await set_recording_status_by_season_match(
+                int(season["id"]), match_id, "processing"
+            )
         embed.set_footer(text=f"Room {data.get('roomId')} • Automatically archived")
         chart = build_vote_history_png(data)
         try:
             if chart:
                 file=discord.File(BytesIO(chart), filename="voting-history.png")
                 embed.set_image(url="attachment://voting-history.png")
-                await channel.send(embed=embed,file=file)
+                message = await channel.send(embed=embed,file=file)
             else:
-                await channel.send(embed=embed)
-            await mark_match_posted(int(season["id"]),fingerprint)
+                message = await channel.send(embed=embed)
+            await mark_match_posted(
+                int(season["id"]), fingerprint, channel.id, message.id
+            )
         except discord.DiscordException as error:
             print(f"Could not post season match: {error}")

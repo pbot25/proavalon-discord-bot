@@ -62,4 +62,3 @@ async def delete_recording_integration(guild_id: int, provider: str) -> None:
         await database.commit()
     finally:
         await database.close()
-

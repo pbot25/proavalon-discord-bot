@@ -175,8 +175,32 @@ async def get_previous_player_brackets(
 
     return found
 
-async def mark_match_posted(season_id:int, fingerprint:str):
+async def mark_match_posted(season_id:int, fingerprint:str, channel_id:int|None=None, message_id:int|None=None):
     db=await connect()
     try:
-        await db.execute("UPDATE season_matches SET posted_at=? WHERE community_season_id=? AND match_fingerprint=?",(utc_now(),season_id,fingerprint)); await db.commit()
+        await db.execute("UPDATE season_matches SET posted_at=?,posted_channel_id=?,posted_message_id=? WHERE community_season_id=? AND match_fingerprint=?",(utc_now(),str(channel_id) if channel_id is not None else None,str(message_id) if message_id is not None else None,season_id,fingerprint)); await db.commit()
+    finally: await db.close()
+
+async def get_match_for_recording(guild_id:int,room_id:int):
+    db=await connect()
+    try:
+        c=await db.execute("SELECT sm.* FROM season_matches sm JOIN community_seasons cs ON cs.id=sm.community_season_id WHERE cs.guild_id=? AND sm.room_id=? ORDER BY sm.finished_at DESC,sm.id DESC LIMIT 1",(str(guild_id),room_id)); return await c.fetchone()
+    finally: await db.close()
+
+async def set_recording_status(match_database_id:int,status:str):
+    db=await connect()
+    try:
+        await db.execute("UPDATE season_matches SET recording_status=? WHERE id=?",(status,match_database_id)); await db.commit()
+    finally: await db.close()
+
+async def set_recording_status_by_season_match(season_id:int,match_id:int,status:str):
+    db=await connect()
+    try:
+        await db.execute("UPDATE season_matches SET recording_status=? WHERE community_season_id=? AND season_match_id=?",(status,season_id,match_id)); await db.commit()
+    finally: await db.close()
+
+async def save_youtube_recording(match_database_id:int,video_id:str,youtube_url:str):
+    db=await connect()
+    try:
+        await db.execute("UPDATE season_matches SET youtube_video_id=?,youtube_url=?,recording_status='ready' WHERE id=?",(video_id,youtube_url,match_database_id)); await db.commit()
     finally: await db.close()

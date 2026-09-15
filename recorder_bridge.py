@@ -14,8 +14,14 @@ from database.recording_integrations import (
     get_recording_integration,
     save_recording_integration,
 )
+from database.matches import (
+    get_match_for_recording,
+    save_youtube_recording,
+    set_recording_status,
+)
 from youtube_oauth import (
     callback_url,
+    decrypt_refresh_token,
     encrypt_refresh_token,
     required_environment,
     validate_oauth_state,
@@ -46,6 +52,12 @@ class RecorderBridge:
         app.router.add_get("/health", self.health)
         if self.secret:
             app.router.add_get("/recorder/lobbies", self.lobbies)
+            app.router.add_post(
+                "/recorder/youtube/uploads/start", self.youtube_upload_start
+            )
+            app.router.add_post(
+                "/recorder/youtube/uploads/complete", self.youtube_upload_complete
+            )
         if youtube_configured:
             app.router.add_get(
                 "/recording/youtube/callback", self.youtube_callback
@@ -173,11 +185,143 @@ class RecorderBridge:
                 "YouTube was not connected", str(error), False
             )
 
-    async def lobbies(self, request: web.Request) -> web.Response:
+    def _authorize_recorder(self, request: web.Request) -> None:
         supplied = request.headers.get("Authorization", "")
         expected = f"Bearer {self.secret}"
-        if not hmac.compare_digest(supplied, expected):
+        if not self.secret or not hmac.compare_digest(supplied, expected):
             raise web.HTTPUnauthorized()
+
+    async def _youtube_access_token(self, integration) -> str:
+        refresh_token = decrypt_refresh_token(
+            str(integration["encrypted_refresh_token"])
+        )
+        async with ClientSession() as session:
+            async with session.post(
+                "https://oauth2.googleapis.com/token",
+                data={
+                    "client_id": required_environment("GOOGLE_YOUTUBE_CLIENT_ID"),
+                    "client_secret": required_environment(
+                        "GOOGLE_YOUTUBE_CLIENT_SECRET"
+                    ),
+                    "refresh_token": refresh_token,
+                    "grant_type": "refresh_token",
+                },
+            ) as response:
+                data = await response.json()
+                if response.status != 200 or not data.get("access_token"):
+                    raise web.HTTPBadGateway(
+                        text="YouTube authorization could not be refreshed."
+                    )
+                return str(data["access_token"])
+
+    async def youtube_upload_start(self, request: web.Request) -> web.Response:
+        self._authorize_recorder(request)
+        body = await request.json()
+        try:
+            guild_id = int(body["guild_id"])
+            room_id = int(body["room_id"])
+            file_size = int(body["file_size"])
+        except (KeyError, TypeError, ValueError):
+            raise web.HTTPBadRequest(text="guild_id, room_id, and file_size are required.")
+
+        match = await get_match_for_recording(guild_id, room_id)
+        if match is None:
+            raise web.HTTPConflict(text="The matching Pbot match is not archived yet.")
+        if match["youtube_url"]:
+            return web.json_response({
+                "already_complete": True,
+                "youtube_url": str(match["youtube_url"]),
+            })
+        integration = await get_recording_integration(guild_id, "youtube")
+        if integration is None or not integration["enabled"]:
+            raise web.HTTPConflict(text="YouTube is not enabled for this server.")
+
+        access_token = await self._youtube_access_token(integration)
+        privacy = os.getenv("YOUTUBE_PRIVACY_STATUS", "unlisted").strip().lower()
+        if privacy not in {"private", "unlisted", "public"}:
+            privacy = "unlisted"
+        title = f"ProAvalon Match #{match['season_match_id']} — Room {room_id}"
+        metadata = {
+            "snippet": {
+                "title": title,
+                "description": (
+                    f"Automatically recorded ProAvalon match #{match['season_match_id']} "
+                    f"from room {room_id}."
+                ),
+            },
+            "status": {"privacyStatus": privacy},
+        }
+        async with ClientSession() as session:
+            async with session.post(
+                "https://www.googleapis.com/upload/youtube/v3/videos",
+                params={"uploadType": "resumable", "part": "snippet,status"},
+                headers={
+                    "Authorization": f"Bearer {access_token}",
+                    "Content-Type": "application/json; charset=UTF-8",
+                    "X-Upload-Content-Length": str(file_size),
+                    "X-Upload-Content-Type": "video/mp4",
+                },
+                json=metadata,
+            ) as response:
+                upload_url = response.headers.get("Location")
+                if response.status not in {200, 201} or not upload_url:
+                    raise web.HTTPBadGateway(
+                        text="YouTube did not create an upload session."
+                    )
+        await set_recording_status(int(match["id"]), "uploading")
+        return web.json_response({"upload_url": upload_url})
+
+    async def youtube_upload_complete(self, request: web.Request) -> web.Response:
+        self._authorize_recorder(request)
+        body = await request.json()
+        try:
+            guild_id = int(body["guild_id"])
+            room_id = int(body["room_id"])
+            video_id = str(body["video_id"]).strip()
+        except (KeyError, TypeError, ValueError):
+            raise web.HTTPBadRequest(text="guild_id, room_id, and video_id are required.")
+        if not video_id:
+            raise web.HTTPBadRequest(text="video_id is required.")
+        match = await get_match_for_recording(guild_id, room_id)
+        if match is None:
+            raise web.HTTPNotFound(text="The matching Pbot match was not found.")
+
+        youtube_url = f"https://youtu.be/{video_id}"
+        await save_youtube_recording(int(match["id"]), video_id, youtube_url)
+        channel_id = match["posted_channel_id"]
+        message_id = match["posted_message_id"]
+        if channel_id and message_id:
+            try:
+                channel = self.bot.get_channel(int(channel_id))
+                if channel is None:
+                    channel = await self.bot.fetch_channel(int(channel_id))
+                message = await channel.fetch_message(int(message_id))
+                if message.embeds:
+                    embed = message.embeds[0].copy()
+                    recording_index = next(
+                        (
+                            index for index, field in enumerate(embed.fields)
+                            if field.name == "Recording"
+                        ),
+                        None,
+                    )
+                    value = f"[Watch the full match on YouTube]({youtube_url})"
+                    if recording_index is None:
+                        embed.add_field(name="Recording", value=value, inline=False)
+                    else:
+                        embed.set_field_at(
+                            recording_index,
+                            name="Recording",
+                            value=value,
+                            inline=False,
+                        )
+                    await message.edit(embed=embed)
+            except Exception as error:
+                print(f"YouTube upload saved, but match embed update failed: {error}")
+        return web.json_response({"ok": True, "youtube_url": youtube_url})
+
+    async def lobbies(self, request: web.Request) -> web.Response:
+        self._authorize_recorder(request)
 
         cog = self.bot.get_cog("LeaderboardCommands")
         tracker = getattr(cog, "rating_tracker", None)

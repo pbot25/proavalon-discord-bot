@@ -77,7 +77,9 @@ class Insights(commands.Cog):
         if not rows: return await interaction.response.send_message('No archived matches yet.',ephemeral=True)
         e=discord.Embed(title=f"{season_display_name(s)} — Recent Matches",color=discord.Color.blurple())
         for r in rows:
-            players=json.loads(r['players_json']); e.add_field(name=f"Match #{r['season_match_id']} • {fmt_date(r['finished_at'])}",value=f"**{r['winner'] or 'Unknown'} Victory**\n"+', '.join(players),inline=False)
+            players=json.loads(r['players_json'])
+            recording=(f"\n[Watch recording]({r['youtube_url']})" if r['youtube_url'] else "")
+            e.add_field(name=f"Match #{r['season_match_id']} • {fmt_date(r['finished_at'])}",value=f"**{r['winner'] or 'Unknown'} Victory**\n"+', '.join(players)+recording,inline=False)
         await interaction.response.send_message(embed=e)
 
     @app_commands.command(name='match',description='Shows one archived match by its season match ID.')
@@ -91,6 +93,8 @@ class Insights(commands.Cog):
         e.add_field(name='Resistance',value='\n'.join(f"`{p['username']}` — {p['role'] or 'Unknown'}" for p in res) or 'N/A',inline=False)
         e.add_field(name='Spies',value='\n'.join(f"`{p['username']}` — {p['role'] or 'Unknown'}" for p in spies) or 'N/A',inline=False)
         missions=json.loads(r['mission_history_json']); e.add_field(name='Missions',value=' '.join('✅' if str(x).casefold()=='succeeded' else '❌' for x in missions) or 'N/A',inline=False)
+        if r['youtube_url']:
+            e.add_field(name='Recording',value=f"[Watch the full match on YouTube]({r['youtube_url']})",inline=False)
         await interaction.response.send_message(embed=e)
 
     @app_commands.command(
@@ -411,9 +415,13 @@ class PastSeason(commands.GroupCog, group_name="past-season", group_description=
         e = discord.Embed(title=f"{season_display_name(season)} — Recent Matches", color=discord.Color.blurple())
         for row in rows:
             players = json.loads(row["players_json"])
+            recording = (
+                f"\n[Watch recording]({row['youtube_url']})"
+                if row["youtube_url"] else ""
+            )
             e.add_field(
                 name=f"Match #{row['season_match_id']} • {fmt_date(row['finished_at'])}",
-                value=f"**{row['winner'] or 'Unknown'} Victory**\n" + ", ".join(players),
+                value=f"**{row['winner'] or 'Unknown'} Victory**\n" + ", ".join(players) + recording,
                 inline=False,
             )
         await interaction.response.send_message(embed=e)
@@ -440,6 +448,8 @@ class PastSeason(commands.GroupCog, group_name="past-season", group_description=
         e.add_field(name="Spies", value="\n".join(f"`{p['username']}` — {p['role'] or 'Unknown'}" for p in spies) or "N/A", inline=False)
         missions = json.loads(row["mission_history_json"])
         e.add_field(name="Missions", value=" ".join("✅" if str(x).casefold()=="succeeded" else "❌" for x in missions) or "N/A", inline=False)
+        if row["youtube_url"]:
+            e.add_field(name="Recording", value=f"[Watch the full match on YouTube]({row['youtube_url']})", inline=False)
         await interaction.response.send_message(embed=e)
 
     @app_commands.command(name="leaderboard", description="Shows an archived leaderboard for a previous season.")

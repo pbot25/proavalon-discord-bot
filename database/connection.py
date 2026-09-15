@@ -490,6 +490,20 @@ async def _migrate_match_durations(
             "ADD COLUMN assassination_duration_seconds REAL"
         )
 
+    recording_columns = {
+        "posted_channel_id": "TEXT",
+        "posted_message_id": "TEXT",
+        "youtube_video_id": "TEXT",
+        "youtube_url": "TEXT",
+        "recording_status": "TEXT",
+    }
+    columns = await _table_columns(database, "season_matches")
+    for column_name, column_type in recording_columns.items():
+        if column_name not in columns:
+            await database.execute(
+                f"ALTER TABLE season_matches ADD COLUMN {column_name} {column_type}"
+            )
+
 
 async def _cleanup_redundant_legacy_tables(
     database: aiosqlite.Connection,

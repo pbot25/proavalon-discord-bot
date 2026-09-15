@@ -240,6 +240,11 @@ CREATE TABLE IF NOT EXISTS season_matches (
     game_duration_seconds REAL,
     assassination_duration_seconds REAL,
     posted_at TEXT,
+    posted_channel_id TEXT,
+    posted_message_id TEXT,
+    youtube_video_id TEXT,
+    youtube_url TEXT,
+    recording_status TEXT,
     FOREIGN KEY (community_season_id) REFERENCES community_seasons(id) ON DELETE CASCADE,
     UNIQUE (community_season_id, match_fingerprint)
 );
