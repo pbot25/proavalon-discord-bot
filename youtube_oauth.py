@@ -72,7 +72,7 @@ def validate_oauth_state(state: str) -> dict[str, str]:
         raise ValueError("The YouTube connection link is invalid or expired.") from error
 
 
-def authorization_url(guild_id: int, user_id: int, action: str = "enable") -> str:
+def authorization_url_from_state(state: str) -> str:
     query = urlencode({
         "client_id": required_environment("GOOGLE_YOUTUBE_CLIENT_ID"),
         "redirect_uri": callback_url(),
@@ -81,9 +81,18 @@ def authorization_url(guild_id: int, user_id: int, action: str = "enable") -> st
         "access_type": "offline",
         "prompt": "consent",
         "include_granted_scopes": "true",
-        "state": create_oauth_state(guild_id, user_id, action),
+        "state": state,
     })
     return f"https://accounts.google.com/o/oauth2/v2/auth?{query}"
+
+
+def connection_url(guild_id: int, user_id: int, action: str = "enable") -> str:
+    state = create_oauth_state(guild_id, user_id, action)
+    return (
+        required_environment("PUBLIC_BASE_URL").rstrip("/")
+        + "/recording/youtube/connect?"
+        + urlencode({"state": state})
+    )
 
 
 def encrypt_refresh_token(refresh_token: str) -> str:

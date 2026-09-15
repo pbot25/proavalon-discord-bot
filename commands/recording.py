@@ -8,7 +8,7 @@ from database.recording_integrations import (
     get_recording_integration,
 )
 from utils.permissions import bot_admin_only
-from youtube_oauth import authorization_url
+from youtube_oauth import connection_url
 
 
 class RecordingCommands(
@@ -36,7 +36,7 @@ class RecordingCommands(
             )
             return
         try:
-            url = authorization_url(
+            url = connection_url(
                 interaction.guild_id, interaction.user.id, "enable"
             )
         except (RuntimeError, ValueError):
@@ -67,7 +67,7 @@ class RecordingCommands(
             )
             return
         try:
-            url = authorization_url(
+            url = connection_url(
                 interaction.guild_id, interaction.user.id, "disable"
             )
         except (RuntimeError, ValueError):

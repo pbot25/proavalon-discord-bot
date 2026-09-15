@@ -20,6 +20,7 @@ from database.matches import (
     set_recording_status,
 )
 from youtube_oauth import (
+    authorization_url_from_state,
     callback_url,
     decrypt_refresh_token,
     encrypt_refresh_token,
@@ -60,6 +61,9 @@ class RecorderBridge:
             )
         if youtube_configured:
             app.router.add_get(
+                "/recording/youtube/connect", self.youtube_connect
+            )
+            app.router.add_get(
                 "/recording/youtube/callback", self.youtube_callback
             )
         self.runner = web.AppRunner(app)
@@ -74,6 +78,16 @@ class RecorderBridge:
 
     async def health(self, request: web.Request) -> web.Response:
         return web.json_response({"ok": True})
+
+    async def youtube_connect(self, request: web.Request) -> web.Response:
+        state = request.query.get("state", "")
+        try:
+            validate_oauth_state(state)
+        except ValueError as error:
+            return self._youtube_result_page(
+                "YouTube was not connected", str(error), False
+            )
+        raise web.HTTPFound(authorization_url_from_state(state))
 
     @staticmethod
     def _youtube_result_page(title: str, message: str, success: bool) -> web.Response:
