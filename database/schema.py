@@ -209,6 +209,18 @@ CREATE TABLE IF NOT EXISTS recording_configs (
     updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS recording_integrations (
+    guild_id TEXT NOT NULL,
+    provider TEXT NOT NULL CHECK (provider IN ('youtube', 'twitch')),
+    enabled INTEGER NOT NULL DEFAULT 0 CHECK (enabled IN (0, 1)),
+    account_id TEXT NOT NULL,
+    account_name TEXT NOT NULL,
+    account_url TEXT NOT NULL,
+    encrypted_refresh_token TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (guild_id, provider)
+);
+
 CREATE TABLE IF NOT EXISTS season_matches (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     community_season_id INTEGER NOT NULL,

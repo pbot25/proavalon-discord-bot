@@ -4,115 +4,106 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from database.recording_settings import (
-    get_recording_config,
-    set_recording_enabled,
-    set_recording_output_channel,
+from database.recording_integrations import (
+    get_recording_integration,
 )
 from utils.permissions import bot_admin_only
+from youtube_oauth import authorization_url
 
 
 class RecordingCommands(
     commands.GroupCog,
     group_name="recording",
-    group_description="Configure automatic match recording.",
+    group_description="Configure automatic match recording integrations.",
 ):
-    output_channel = app_commands.Group(
-        name="output-channel",
-        description="Configure where completed match recordings are posted.",
+    youtube = app_commands.Group(
+        name="youtube",
+        description="Connect YouTube for automatic match recordings.",
     )
 
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
 
-    @app_commands.command(
+    @youtube.command(
         name="enable",
-        description="Enables automatic recording for qualifying matches.",
+        description="Connects a YouTube channel and enables YouTube recordings.",
     )
     @bot_admin_only()
-    async def enable(self, interaction: discord.Interaction) -> None:
-        await set_recording_enabled(interaction.guild_id, True)
+    async def youtube_enable(self, interaction: discord.Interaction) -> None:
+        if interaction.guild_id is None:
+            await interaction.response.send_message(
+                "This command can only be used in a server.", ephemeral=True
+            )
+            return
+        try:
+            url = authorization_url(
+                interaction.guild_id, interaction.user.id, "enable"
+            )
+        except (RuntimeError, ValueError):
+            await interaction.response.send_message(
+                "YouTube linking is not configured on Pbot yet.", ephemeral=True
+            )
+            return
+
+        view = discord.ui.View()
+        view.add_item(discord.ui.Button(label="Connect YouTube", url=url))
         await interaction.response.send_message(
-            "Automatic match recording is enabled for this server.",
+            "Use this private button to choose the YouTube channel for match recordings. "
+            "The link expires in 10 minutes.",
+            view=view,
             ephemeral=True,
         )
 
-    @app_commands.command(
+    @youtube.command(
         name="disable",
-        description="Disables automatic recording for future matches.",
+        description="Disconnects YouTube and disables future YouTube recordings.",
     )
     @bot_admin_only()
-    async def disable(self, interaction: discord.Interaction) -> None:
-        await set_recording_enabled(interaction.guild_id, False)
+    async def youtube_disable(self, interaction: discord.Interaction) -> None:
+        current = await get_recording_integration(interaction.guild_id, "youtube")
+        if not current:
+            await interaction.response.send_message(
+                "YouTube recording is already disabled.", ephemeral=True
+            )
+            return
+        try:
+            url = authorization_url(
+                interaction.guild_id, interaction.user.id, "disable"
+            )
+        except (RuntimeError, ValueError):
+            await interaction.response.send_message(
+                "YouTube linking is not configured on Pbot yet.", ephemeral=True
+            )
+            return
+
+        view = discord.ui.View()
+        view.add_item(discord.ui.Button(label="Verify and disconnect YouTube", url=url))
         await interaction.response.send_message(
-            (
-                "Automatic match recording is disabled. "
-                "An active recording is not interrupted."
-            ),
+            "Sign in to the currently connected YouTube channel to confirm disconnection. "
+            "The link expires in 10 minutes.",
+            view=view,
             ephemeral=True,
         )
 
     @app_commands.command(
         name="status",
-        description="Shows this server's automatic recording settings.",
+        description="Shows connected recording services for this server.",
     )
     @bot_admin_only()
     async def status(self, interaction: discord.Interaction) -> None:
-        config = await get_recording_config(interaction.guild_id)
-        enabled = bool(config and config["enabled"])
-        output_channel_id = (
-            str(config["output_channel_id"])
-            if config and config["output_channel_id"]
-            else None
-        )
-        destination = (
-            f"<#{output_channel_id}>"
-            if output_channel_id
-            else "the normal match-history channel"
-        )
-        await interaction.response.send_message(
-            "\n".join(
-                (
-                    f"**Automatic recording:** {'Enabled' if enabled else 'Disabled'}",
-                    f"**Recording destination:** {destination}",
-                    "**Recorder trigger:** Match start, with at least six linked match players in one VC",
-                )
-            ),
-            ephemeral=True,
-        )
+        youtube = await get_recording_integration(interaction.guild_id, "youtube")
+        if youtube and youtube["enabled"]:
+            youtube_status = (
+                f"Enabled — [{youtube['account_name']}]({youtube['account_url']})"
+            )
+        else:
+            youtube_status = "Disabled — no account connected"
 
-    @output_channel.command(
-        name="set",
-        description="Sets a dedicated channel for completed match recordings.",
-    )
-    @app_commands.describe(channel="Channel that should receive completed recordings.")
-    @bot_admin_only()
-    async def set_output_channel(
-        self,
-        interaction: discord.Interaction,
-        channel: discord.TextChannel,
-    ) -> None:
-        await set_recording_output_channel(interaction.guild_id, channel.id)
         await interaction.response.send_message(
-            f"Completed match recordings will be posted in {channel.mention}.",
-            ephemeral=True,
-        )
-
-    @output_channel.command(
-        name="clear",
-        description="Uses the normal match-history channel for recordings.",
-    )
-    @bot_admin_only()
-    async def clear_output_channel(
-        self,
-        interaction: discord.Interaction,
-    ) -> None:
-        await set_recording_output_channel(interaction.guild_id, None)
-        await interaction.response.send_message(
-            (
-                "The dedicated recording channel was cleared. Completed recordings "
-                "will use the normal match-history channel."
-            ),
+            "\n".join((
+                f"**YouTube:** {youtube_status}",
+                "**Twitch:** Not available yet",
+            )),
             ephemeral=True,
         )
 
