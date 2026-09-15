@@ -1,0 +1,54 @@
+{
+  "name": "Français",
+  "common": {
+    "close": "Fermer",
+    "cancel": "Annuler",
+    "delete": "Supprimer",
+    "download": "Télécharger",
+    "loading": "Chargement…",
+    "downloading": "Téléchargement…"
+  },
+  "recording": {
+    "delete": "Supprimer l'enregistrement",
+    "recording_id": "ID de l'enregistrement",
+    "delete_modal": {
+      "header": "Es-tu sûr de vouloir supprimer ce téléchargement?",
+      "subtext": "Cette action est IRRÉVERSIBLE et personne ne peut le récupérer."
+    }
+  },
+  "download": {
+    "sections": {
+      "downloads": "Téléchargements",
+      "avatars": "Avatars",
+      "mt": "Multi-pistes",
+      "st": "Mono-piste mixée",
+      "stsm": "Mono-piste Mix Intelligent",
+      "local_processing": "Traitement local"
+    },
+    "format_buttons": {
+      "audacity": "Projet Audacity",
+      "win_executable": "Application Windows",
+      "unix_script": "Script Unix",
+      "other": "Autre"
+    },
+    "ennuizel_modal": {
+      "header": "Fais attention aux boutons rouges !",
+      "description": "Les boutons avec une bordure rouge nécessitent un traitement audio dans le navigateur avec Ennuizel. En fonction de ton navigateur, cela peut ne pas être supporté ou consommer beaucoup de RAM pour effectuer l'enregistrement. Si il y a des problèmes, choisis un format différent.",
+      "confirm": "Je comprends"
+    }
+  },
+  "avatar_overlays": {
+    "name": "Overlay d'avatars",
+    "options": {
+      "bg": "Couleur de fond",
+      "fg": "Couleur de l'éclat",
+      "transparent": "Fond transparent",
+      "format": "Format"
+    }
+  },
+  "footer": {
+    "build": "Version",
+    "tos": "Conditions d'utilisation",
+    "privacy": "Politique de confidentialité"
+  }
+}

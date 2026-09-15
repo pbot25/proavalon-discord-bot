@@ -1,0 +1,54 @@
+{
+  "name": "Español",
+  "common": {
+    "close": "Cerrar",
+    "cancel": "Cancelar",
+    "delete": "Borrar",
+    "download": "Descarga",
+    "loading": "Cargando…",
+    "downloading": "Descargando…"
+  },
+  "recording": {
+    "delete": "Eliminar grabación",
+    "recording_id": "ID de grabación",
+    "delete_modal": {
+      "header": "¿Estas seguro de que quieres eliminar esta grabación?",
+      "subtext": "Esta accion es irreversible y nadie puede ayudarte a recuperarla."
+    }
+  },
+  "download": {
+    "sections": {
+      "downloads": "Descargas",
+      "avatars": "Avatares",
+      "mt": "Multi-pista",
+      "st": "Mezcla en una pista",
+      "stsm": "Mezcla en una pista (Mezcla inteligente)",
+      "local_processing": "Procesamiento local"
+    },
+    "format_buttons": {
+      "audacity": "Proyecto de Audacity",
+      "win_executable": "Aplicación de Windows",
+      "unix_script": "Script Unix",
+      "other": "Otros"
+    },
+    "ennuizel_modal": {
+      "header": "¡Cuidado con los botones rojos!",
+      "description": "Los botones que tienen un borde rojo requieren procesamiento de audio en su navegador mediante Ennuizel. Dependiendo de su navegador, es posible que no sea compatible o que necesite una gran cantidad de RAM para procesar su grabación. Si tiene algún problema, elija un formato diferente.",
+      "confirm": "Entiendo"
+    }
+  },
+  "avatar_overlays": {
+    "name": "Superposiciones de Avatares",
+    "options": {
+      "bg": "Color de fondo",
+      "fg": "Color del resplandor",
+      "transparent": "Fondo transparente",
+      "format": "Formato"
+    }
+  },
+  "footer": {
+    "build": "Revisión",
+    "privacy": "Política de privacidad",
+    "tos": "Terminos de servicio"
+  }
+}

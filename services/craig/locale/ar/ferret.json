@@ -1,0 +1,22 @@
+{
+  "name": "عربى",
+  "common": {
+    "close": "اغلق",
+    "cancel": "الغاء",
+    "delete": "إحذف",
+    "loading": "تحميل…",
+    "downloading": "جاري التحميل…"
+  },
+  "recording": {
+    "delete": "أحذف التسجيل",
+    "recording_id": "رقم التسجيل"
+  },
+  "download": {
+    "ennuizel_modal": {
+      "header": "إحذر الزرائر الحمراء!"
+    }
+  },
+  "footer": {
+    "build": "الإصدار"
+  }
+}

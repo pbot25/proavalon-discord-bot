@@ -1,0 +1,29 @@
+{
+  "name": "@craig/db",
+  "version": "0.0.1",
+  "license": "MIT",
+  "type": "module",
+  "exports": "./dist/index.mjs",
+  "files": [
+    "dist/**"
+  ],
+  "scripts": {
+    "build": "prisma generate && tsdown src/index.ts",
+    "db:migrate:deploy": "prisma migrate deploy",
+    "db:migrate:dev": "prisma migrate dev",
+    "db:push": "prisma db push",
+    "format": "prisma format",
+    "generate": "prisma generate",
+    "lint": "eslint .",
+    "studio": "prisma studio",
+    "prisma": "prisma"
+  },
+  "dependencies": {
+    "@prisma/adapter-pg": "^7.10.0",
+    "@prisma/client": "^7.10.0",
+    "prisma": "^7.10.0"
+  },
+  "devDependencies": {
+    "tsdown": "catalog:"
+  }
+}

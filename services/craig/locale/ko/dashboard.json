@@ -1,0 +1,113 @@
+{
+    "common": {
+        "close": "닫기",
+        "cancel": "취소",
+        "delete": "삭제",
+        "remove": "제거",
+        "download": "다운로드",
+        "nevermind": "유지",
+        "loading": "불러오는 중…",
+        "language": "언어",
+        "disconnect": "연결 해제",
+        "connect": "연결",
+        "profile": "프로필",
+        "save": "저장",
+        "manage": "관리",
+        "logout": "로그아웃",
+        "avatar": "아바타",
+        "okay": "네",
+        "new": "새로 만들기",
+        "dismiss": "그만 보기"
+    },
+    "login_page": {
+        "header": "Discord로 Craig 대시보드에 로그인하세요.",
+        "disclaimer": "로그인 상태를 유지하기 위해서 쿠키를 사용합니다. 로그인하는 것은 쿠키를 사용하고 저장하는 것에 동의하는 것입니다.",
+        "login": "Discord로 로그인"
+    },
+    "headers": {
+        "supporter_status": "서포터 상태",
+        "cloud_backup": "클라우드 백업"
+    },
+    "supporter_tiers": {
+        "0": "서포터 티어 없음",
+        "10": "티어 1 서포터",
+        "20": "티어 2 서포터",
+        "30": "티어 3 서포터",
+        "100": "MP3 God",
+        "-1": "Greater Weasel"
+    },
+    "supporter_status": {
+        "dev_tier": "개발자가 티어를 지급했습니다!",
+        "manage": "구독 관리하기",
+        "cta": "서포터가 되어주세요!",
+        "feature_available_in": "이 기능은 {tier}에서 제공됩니다."
+    },
+    "supporter_troubleshoot": {
+        "header": "방금 지원을 시작하셨나요?",
+        "line_1": "Patreon에서 Discord를 연동한 경우, 자동으로 혜택을 쓸 수 있게 됩니다. 그렇지 않은 경우, 여기서 Patreon 계정을 연동해주세요.",
+        "line_3": "아직 티어를 받지 못하셨나요? {support_server}에 참여해서 도움을 요청하세요.",
+        "support_server": "지원 서버",
+        "line_2": "녹음할 때 쓰는 Discord 계정과 동일한 계정으로 대시보드에 로그인했고, 후원에 사용하는 Patreon 계정과 동일한 계정에 연결되어 있는지 확인하세요."
+    },
+    "disconnect_patreon": {
+        "header": "정말 Patreon 계정 연결을 해제하시겠어요?",
+        "text": "Patreon 계정 연결을 해제할 경우 혜택을 사용할 수 없게 될 수 있습니다."
+    },
+    "errors": {
+        "unknown": "알 수 없는 오류가 발생하였습니다. 다시 시도해주세요.",
+        "server_error": "서버 오류가 발생했습니다. 다시 시도해주세요.",
+        "invalid_body": "서버에 잘못된 요청을 보냈습니다. 귀하의 잘못이 아닙니다. 문제가 지속되면 페이지를 다시 로드해보세요.",
+        "login": "로그인이 필요합니다.",
+        "unauthorized": "세션이 만료되었습니다. 페이지를 다시 로드해주세요.",
+        "invalid_format": "잘못된 형식입니다.",
+        "feature_unavailable": "현재 사용하실 수 없는 기능을 요청하셨습니다.",
+        "not_supporter": "이 동작을 위해서는 서포터 티어가 필요합니다.",
+        "need_higher_tier": "이 동작을 위해서는 더 높은 서포터 티어가 필요합니다."
+    },
+    "format_buttons": {
+        "plain_text": "일반 텍스트",
+        "srt": "SubRip 텍스트",
+        "audacity": "오다시티 프로젝트(Audacity Project)",
+        "adobe_audition": "어도비 오디션 세션"
+    },
+    "format_sections": {
+        "mt": "멀티 트랙",
+        "stsm": "싱글 트랙 스마트 믹스"
+    },
+    "connection_errors": {
+        "NO_ACCESS_TOKEN": "{service}에서 토큰을 가져올 수 없었습니다. 다시 시도해주세요.",
+        "NO_USER_DATA": "{service}에서 데이터를 가져올 수 없었습니다. 다시 시도해주세요.",
+        "INVALID_SCOPE": "Craig에 필요한 권한 중 일부만 허용하셨습니다. 모든 권한을 허용하셔야 {service}를 연결할 수 있습니다.",
+        "USER_ID_MISMATCH": "현재 로그인 하신 Discord 계정과 Patreon 계정에 연동하신 Discord 계정이 일치하지 않습니다. Patreon에서 연동한 Discord 계정을 변경한 후 다시 시도해주세요."
+    },
+    "connection_responses": {
+        "account_linked": "{service} 계정을 연결했습니다.",
+        "connect_failed": "{service} 계정에 연결하지 못했습니다."
+    },
+    "cloud_backup": {
+        "enable": "클라우드 백업 활성화",
+        "enable_desc": "Craig가 자동으로 녹음을 업로드하도록 허용합니다. 이것은 귀하가 시작한 녹음에만 적용됩니다.",
+        "select_service": "업로드 서비스 선택",
+        "select_format": "업로드 포맷 선택",
+        "upload_service": "업로드 서비스",
+        "upload_format": "업로드 포맷",
+        "disconnected_service": "{service} 연결 해제됨",
+        "revoke_app_perms": "추가적으로 {service} 설정에서 권한 부여를 취소할 수도 있습니다.",
+        "view_settings": "설정 보기",
+        "settings_error": "설정 적용 중 오류 발생",
+        "upload_options": "업로드 옵션",
+        "exclude_bots": "봇 제외",
+        "exclude_bots_desc": "다운로드할 때 Discord 봇의 트랙을 제외합니다.",
+        "include_transcription": "자막 포함",
+        "include_transcription_desc": "멀티 트랙 포맷을 업로드할 때 지정된 포맷의 자막을 포함합니다. 자막 생성에 실패할 경우, 자막 없이 업로드를 진행합니다."
+    },
+    "footer": {
+        "privacy": "개인정보 취급 방침",
+        "tos": "이용 약관"
+    },
+    "survey": {
+        "text": "짧은 설문 조사를 완료해서 Craig에게 피드백을 공유해주세요.",
+        "cta": "설문 조사 진행하기"
+    },
+    "name": "한국어"
+}

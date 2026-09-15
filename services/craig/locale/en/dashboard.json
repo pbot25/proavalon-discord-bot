@@ -1,0 +1,113 @@
+{
+    "name": "English",
+    "common": {
+        "close": "Close",
+        "cancel": "Cancel",
+        "delete": "Delete",
+        "remove": "Remove",
+        "avatar": "Avatar",
+        "okay": "Okay",
+        "download": "Download",
+        "nevermind": "Nevermind",
+        "loading": "Loading…",
+        "language": "Language",
+        "new": "New",
+        "dismiss": "Dismiss",
+        "disconnect": "Disconnect",
+        "connect": "Connect",
+        "profile": "Profile",
+        "save": "Save",
+        "manage": "Manage",
+        "logout": "Logout"
+    },
+    "login_page": {
+        "header": "Log in with Discord to access the Craig dashboard.",
+        "disclaimer": "We use cookies to keep you logged in. By logging in, you allow us to store and use them.",
+        "login": "Login with Discord"
+    },
+    "headers": {
+        "supporter_status": "Supporter Status",
+        "cloud_backup": "Cloud Backup"
+    },
+    "supporter_tiers": {
+        "0": "No Supporter Tier",
+        "10": "Tier 1 Supporter",
+        "20": "Tier 2 Supporter",
+        "30": "Tier 3 Supporter",
+        "100": "MP3 God",
+        "-1": "Greater Weasel"
+    },
+    "supporter_status": {
+        "dev_tier": "A developer gave you this tier!",
+        "manage": "Manage subscription",
+        "cta": "Become a Supporter!",
+        "feature_available_in": "This feature is available in {tier}."
+    },
+    "supporter_troubleshoot": {
+        "header": "Have you recently became a patron?",
+        "line_1": "If you linked your Discord through Patreon itself, it should give you benefits automatically. Otherwise, connect your Patreon account from here to get your tier.",
+        "line_2": "Make sure you are logging in with the same Discord account you record with and connecting to the same Patreon account you are supporting through.",
+        "line_3": "Still didn't recieve your tier? Join the {support_server} for help.",
+        "support_server": "support server"
+    },
+    "disconnect_patreon": {
+        "header": "Are you sure you want to disconnect your Patreon account?",
+        "text": "Your benefits may be revoked if you disconnect your Patreon account."
+    },
+    "errors": {
+        "unknown": "An unknown error occurred, try again later.",
+        "server_error": "A server error occurred, try again later.",
+        "invalid_body": "We sent an invalid request to the server, you probably shouldn't see this. Reload the page if this issue persists.",
+        "login": "You need to log in to do this.",
+        "unauthorized": "Your login has expired, please reload the page.",
+        "invalid_format": "An invalid format was provided.",
+        "feature_unavailable": "You requested to use a feature that you can't use.",
+        "not_supporter": "A Supporter tier is required for this action.",
+        "need_higher_tier": "A higher Supporter tier is needed for this action."
+    },
+    "format_buttons": {
+        "audacity": "Audacity Project",
+        "adobe_audition": "Adobe Audition Session",
+        "plain_text": "Plain Text",
+        "srt": "SubRip Text"
+    },
+    "format_sections": {
+        "mt": "Multi-track",
+        "stsm": "Single-track Smart Mix"
+    },
+    "connection_errors": {
+        "NO_ACCESS_TOKEN": "Could not get an access token from {service}, try again later.",
+        "NO_USER_DATA": "Could not get user data from {service}, try again later.",
+        "INVALID_SCOPE": "You have provided partial permissions to Craig. {service} won't be connected unless all permissions are checked.",
+        "USER_ID_MISMATCH": "The Discord account linked to your Patreon account does not match the one you are logged into currently. Please change your Discord account connection in Patreon and then try again."
+    },
+    "connection_responses": {
+        "account_linked": "Connected your {service} account.",
+        "connect_failed": "Couldn't connect your {service} account."
+    },
+    "cloud_backup": {
+        "enable": "Enable Cloud Backup",
+        "enable_desc": "Allow Craig to automatically upload recordings to your upload service. This only applies to recordings you start.",
+        "select_service": "Select an upload service",
+        "select_format": "Select an upload format",
+        "upload_service": "Upload Service",
+        "upload_format": "Upload Format",
+        "disconnected_service": "Disconnected from {service}",
+        "revoke_app_perms": "You may also revoke app permissions in your {service} settings.",
+        "view_settings": "View Settings",
+        "settings_error": "Error updating settings",
+        "upload_options": "Upload Options",
+        "exclude_bots": "Exclude Bots",
+        "exclude_bots_desc": "Excludes tracks from Discord bots from being in the download.",
+        "include_transcription": "Include Transcription",
+        "include_transcription_desc": "Include a transcription along with the recording in the specified format for multi-track formats. If the transcription fails, the recording will still upload without it."
+    },
+    "footer": {
+        "privacy": "Privacy Policy",
+        "tos": "Terms of Service"
+    },
+    "survey": {
+        "text": "Please take this quick survey and give some feedback about Craig.",
+        "cta": "Take the Survey"
+    }
+}

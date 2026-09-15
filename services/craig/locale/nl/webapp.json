@@ -1,0 +1,92 @@
+{
+    "_local_name": "Nederlands",
+    "craigWebapp": "Craig Web-applicatie",
+    "options": {
+        "flac": {
+            "desc": "Rechtstreeks opnemen naar FLAC maakt je audio bijna identiek aan het opnemen van mensen afzonderlijk.",
+            "title": "Opnemen in FLAC",
+            "disabled": "De FLAC-modus is niet beschikbaar op je server. Word een patron om deze functie te gebruiken."
+        },
+        "continuous": {
+            "title": "Continue Modus",
+            "desc": "Schakel VAD uit en neem alles op wat uw microfoon opvangt.",
+            "disabled": "Je server heeft geen continue modus. Word een patron om deze functie te gebruiken."
+        },
+        "nr": {
+            "title": "Geluidsonderdrukking",
+            "desc": "Onderdrukt achtergrondgeluid van je microfoon. Je kunt dit tijdens de opname aanpassen."
+        }
+    },
+    "login": {
+        "tos": "Servicevoorwaarden",
+        "errors": {
+            "notFound": "Deze opname is niet gevonden. Controleer of de web applicatie is ingeschakeld voor uw opname.",
+            "invalidKey": "De webapplicatie-sleutel voor deze opname is ongeldig.",
+            "noID": "Geen Opname ID verstrekt.",
+            "noKey": "Geen web applicatie sleutel verstrekt."
+        },
+        "connect": "Verbind",
+        "recId": "Opname ID",
+        "webKey": "Web-applicatie Sleutel",
+        "server": "Server",
+        "what": "Wat is dit?",
+        "home": "Hoofdpagina",
+        "privacy": "Privacybeleid"
+    },
+    "onboarding": {
+        "joining": "Aan het aansluiten",
+        "nickLabel": "Hoe moet ik je noemen?",
+        "monitorDesc": "Volg wanneer mensen worden opgenomen",
+        "noAudio": {
+            "desc": "Klik op het pictogram naast de URL-balk, schakel de microfoontoestemming in en laad de pagina opnieuw.",
+            "title": "Ik kan je microfoon niet gebruiken!"
+        },
+        "join": "Word lid van opname",
+        "nickPlaceholder": "Bijnaam",
+        "requesting": "Verzoek om toestemming…",
+        "record": "Opnemen",
+        "recordDesc": "Deelnemen aan de opnamesessie als gebruiker",
+        "monitor": "Volgen",
+        "errors": {
+            "audioPerm": "Foutmelding tijdens de aanvraag voor de audio rechten",
+            "badNick": "Ongeldige gebruikersnaam.",
+            "badServer": "Ongeldige server."
+        }
+    },
+    "modal": {
+        "errors": {
+            "CLOSED": "De verbinding met de server was gesloten.",
+            "INVALID": "De server kon onze data niet inladen om een of andere reden!",
+            "INVALID_USERNAME": "De gebruikersnaam die naar de server is gestuurd, is ongeldig!",
+            "SHARD_CLOSED": "De verbinding van de opname was zomaar gesloten.",
+            "RECORDING_ENDED": "De opname is gestopt.",
+            "INVALID_MESSAGE": "De server kon onze data niet laden om een of andere reden!",
+            "INVALID_ID": "Het ID dat naar de server is gestuurd, is ongeldig!",
+            "INVALID_FLAGS": "De opties die naar de server gestuurd waren, zijn ongeldig!",
+            "INVALID_TOKEN": "De sleutel die naar de server was gestuurd is ongeldig!",
+            "INVALID_CONNECTION_TYPE": "Het verbindingstype dat naar de server is gestuurd, is ongeldig!",
+            "NOT_FOUND": "De opname is niet meer verbonden met de server!",
+            "ALREADY_CONNECTED": "Er zijn teveel mensen verbonden bij deze opname!"
+        },
+        "disconnected": "Ontkoppeld.",
+        "disconnectedBody": "Je verbinding met de server was verloren.",
+        "reason": "Reden",
+        "reload": "Herladen"
+    },
+    "back": "Terug",
+    "in": "in",
+    "server": {
+        "local": "Lokaal",
+        "custom": "Aangepast"
+    },
+    "rec": {
+        "viaWeb": "(via Web applicatie)",
+        "noUsersConnected": "Geen gebruikers verbonden…",
+        "connectedAs": "Verbonden als",
+        "continuous": "Continu",
+        "mute": "Dempen",
+        "unmute": "Dempen weghalen",
+        "disconnect": "Ontkoppelen",
+        "microphone": "Microfoon"
+    }
+}

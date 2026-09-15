@@ -1,0 +1,109 @@
+{
+    "name": "Türkçe",
+    "common": {
+        "close": "Kapat",
+        "cancel": "İptal et",
+        "delete": "Sil",
+        "download": "İndir",
+        "loading": "Yükleniyor…",
+        "remove": "Kaldır",
+        "avatar": "Avatar",
+        "okay": "Tamam",
+        "nevermind": "Vazgeç",
+        "language": "Dil",
+        "new": "Yeni",
+        "dismiss": "Kapat",
+        "disconnect": "Kaldır",
+        "connect": "Bağla",
+        "profile": "Profil",
+        "save": "Kaydet",
+        "manage": "Yönet",
+        "logout": "Oturumu Kapat"
+    },
+    "format_sections": {
+        "mt": "Çoklu Parça",
+        "stsm": "Tek Parça Akıllı Mix"
+    },
+    "format_buttons": {
+        "audacity": "Audacity Projesi",
+        "adobe_audition": "Adobe Audition Dosyası",
+        "srt": "SubRip Metin",
+        "plain_text": "Düz Metin"
+    },
+    "footer": {
+        "tos": "Hizmet Şartları",
+        "privacy": "Güvenlik Politikası"
+    },
+    "errors": {
+        "invalid_format": "Geçersiz bir format sağlandı.",
+        "invalid_body": "Sunucuya geçersiz bir istek gönderdik, muhtemelen bunu görmemelisiniz. Bu sorun devam ederse sayfayı yeniden yükleyin.",
+        "unknown": "Bilinmeyen bir hata oluştu, daha sonra tekrar dene.",
+        "server_error": "Bir sunucu hatası oluştu, daha sonra tekrar dene.",
+        "login": "Bunu yapabilmek için giriş yapman gerekli.",
+        "unauthorized": "Oturumun zaman aşımına uğramıştır, lütfen sayfayı yeniden yükleyin.",
+        "feature_unavailable": "Kullanmaya hakkın olmadığı bir özelliği kullanmaya çalıştın.",
+        "not_supporter": "Bu eylem için bir Destekçi seviyesi gerekli.",
+        "need_higher_tier": "Bu eylem için daha yüksek bir Destekçi seviyesi gerekli."
+    },
+    "login_page": {
+        "header": "Craig paneline erişmek için Discord ile giriş yapın.",
+        "disclaimer": "Oturumunuz açık tutmak için çerez kullanıyoruz. Oturum açarak, bize çerez barındırmak ve kullanmak için yetki veriyorsunuz.",
+        "login": "Discord ile Giriş Yap"
+    },
+    "headers": {
+        "supporter_status": "Destekçi Durumu",
+        "cloud_backup": "Bulut Yedekleme"
+    },
+    "supporter_tiers": {
+        "0": "Destekçi Değil",
+        "10": "1. Kademe Destekçi",
+        "20": "2. Kademe Destekçi",
+        "30": "3. Kademe Destekçi",
+        "100": "MP3 Tanrısı",
+        "-1": "Greater Weasel"
+    },
+    "supporter_status": {
+        "dev_tier": "Bir geliştirici size bu kademeyi verdi!",
+        "manage": "Aboneliği yönet",
+        "cta": "Bir Destekçi Ol!",
+        "feature_available_in": "Bu özellik {tier}ler'e açıktır."
+    },
+    "supporter_troubleshoot": {
+        "header": "Yakın zamanda mı Patreon'a abone oldun?",
+        "line_1": "Discord hesabınızı Patreon üzerinden bağladıysanız, avantajlardan otomatik olarak yararlanabilirsiniz. Aksi takdirde, buradan Patreon hesabınızı bağlayarak destekçi seviyenizi belirleyin.",
+        "line_2": "Kayıt yaptığınız Discord hesabıyla oturum açtığınızdan ve desteklediğiniz Patreon hesabına bağlandığınızdan emin olun.",
+        "line_3": "Hala destekçi seviyenizi almadınız mı? {support_server}'na katılıp sorabilirsiniz.",
+        "support_server": "destek sunucusu"
+    },
+    "disconnect_patreon": {
+        "header": "Patreon hesabının bağlantısını kesmek istediğinden emin misin?",
+        "text": "Patreon destekçi hakların iptal edilebilir."
+    },
+    "connection_errors": {
+        "NO_ACCESS_TOKEN": "{service}'den erişim anahtarı sağlanamadı, daha sonra tekrar dene.",
+        "NO_USER_DATA": "{service}'den kullanıcı bilgisi sağlanamadı, daha sonra tekrar dene.",
+        "INVALID_SCOPE": "Craig'e kısmi izinler verildi. Bütün izinler verilene kadar {service} bağlanılmayacak.",
+        "USER_ID_MISMATCH": "Patreon hesabına bağlı Discord hesabı, şu anda oturum açtığın hesapla eşleşmiyor. Lütfen Patreon'da Discord hesap bağlantını değiştir ve tekrar dene."
+    },
+    "connection_responses": {
+        "account_linked": "{service} hesabın bağlandı.",
+        "connect_failed": "{service} hesabın bağlanılamadı."
+    },
+    "cloud_backup": {
+        "enable": "Bulut Yedeklemeyi Aktifleştir",
+        "enable_desc": "Craig'in kayıtları otomatik olarak yükleme hizmetinize yüklemesine izin verin. Bu, yalnızca sizin başlattığınız kayıtlar için geçerlidir.",
+        "select_service": "Yükleme hizmeti seç",
+        "select_format": "Yükleme formatı seç",
+        "upload_service": "Yükleme Servisi",
+        "upload_format": "Yükleme Formatı",
+        "disconnected_service": "{service} bağlantısı iptal edildi",
+        "revoke_app_perms": "Ayrıca {service} ayarlarından uygulama izinlerini iptal edebilirsiniz.",
+        "view_settings": "Ayarları Görüntüle",
+        "settings_error": "Ayarları güncellerken bir hata oluştu",
+        "upload_options": "Yükleme Tercihleri"
+    },
+    "survey": {
+        "text": "Lütfen bu kısa anketi doldurun ve Craig hakkında geri bildirimde bulunun.",
+        "cta": "Anekete Katıl"
+    }
+}

@@ -1,0 +1,78 @@
+{
+    "common": {
+        "close": "닫기",
+        "cancel": "취소",
+        "delete": "삭제",
+        "remove": "제거",
+        "download": "다운로드",
+        "nevermind": "유지",
+        "loading": "불러오는 중…",
+        "language": "언어",
+        "avatar": "아바타",
+        "okay": "네",
+        "new": "새로 만들기",
+        "dismiss": "그만 보기",
+        "downloading": "다운로드 중…",
+        "show_all": "모두 보기",
+        "show_less": "덜 보기",
+        "app": "앱",
+        "beta": "베타",
+        "format": "포맷",
+        "processing": "처리 중…"
+    },
+    "errors": {
+        "unknown": "알 수 없는 오류가 발생하였습니다. 다시 시도해주세요.",
+        "server_error": "서버 오류가 발생했습니다. 다시 시도해주세요.",
+        "invalid_body": "서버에 잘못된 요청을 보냈습니다. 귀하의 잘못이 아닙니다. 문제가 지속되면 페이지를 다시 로드해보세요.",
+        "invalid_format": "잘못된 형식입니다."
+    },
+    "footer": {
+        "privacy": "개인정보 취급 방침",
+        "tos": "이용 약관"
+    },
+    "survey": {
+        "text": "짧은 설문 조사를 완료해서 Craig에게 피드백을 공유해주세요.",
+        "cta": "설문 조사 진행하기"
+    },
+    "name": "한국어",
+    "recording": {
+        "reveal_duration": "시간 보기",
+        "live_warning": {
+            "title": "녹음 진행 중",
+            "description": "녹음이 진행 중입니다. 지금 처리를 진행하는 것은 지금까지 녹음된 일부만 제공합니다."
+        },
+        "delete": "녹음 삭제",
+        "expires_soon": "곧 만료",
+        "rec": "녹음 중",
+        "expires_in": "{expiry} 만료",
+        "recording_id": "녹음 ID",
+        "users_recorded": "{count, plural,\n  one {{count, number}명의 사용자가 녹음됨}\n  other {{count, number}명의 사용자가 녹음됨}\n}",
+        "recording_date": "{date, date, all}에 녹음됨",
+        "by_user": "{channel}을 {user}가",
+        "via_bot": "{bot} 사용됨",
+        "delete_modal": {
+            "header": "정말 이 녹음을 삭제하시겠습니까?",
+            "subtext": "이 작업은 영구적이며 되돌릴 수 없습니다.",
+            "delete_key": "삭제 키",
+            "delete_key_invalid": "입력한 키가 잘못되었습니다.",
+            "delete_key_hint": "삭제 키는 DM을 확인하거나 {command} 명령어를 사용하면 알 수 있습니다.",
+            "confirm": "녹음 삭제하기"
+        }
+    },
+    "color_picker": {
+        "h": "색조",
+        "s": "채도",
+        "v": "밝기",
+        "r": "빨강",
+        "g": "초록",
+        "b": "파랑",
+        "a": "알파",
+        "hex": "HEX 색",
+        "without_color": "색 없이",
+        "change_to": "{mode}로 변경"
+    },
+    "download": {
+        "no_users": "녹음에 아무도 없습니다.",
+        "show_all_formats": "모든 형식 보기"
+    }
+}

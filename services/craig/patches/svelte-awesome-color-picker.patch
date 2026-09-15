@@ -1,0 +1,21 @@
+diff --git a/dist/components/variant/default/TextInput.svelte b/dist/components/variant/default/TextInput.svelte
+index 371843460b3c6c76b0a7a7011b493bad17d6153e..9a196e1403c53c781ebc2e124d39e8ea404fd8df 100644
+--- a/dist/components/variant/default/TextInput.svelte
++++ b/dist/components/variant/default/TextInput.svelte
+@@ -96,14 +96,14 @@
+ 	{#if textInputModes.length > 1}
+ 		<button type="button" onclick={() => (mode = nextMode)}>
+ 			<span class="disappear" aria-hidden="true">{texts.color[mode]}</span>
+-			<span class="appear">{texts.changeTo} {texts.color[nextMode]}</span>
++			<span class="appear">{texts.changeTo.includes('{mode}') ? texts.changeTo.replace('{mode}', texts.color[nextMode]) : `${texts.changeTo} ${texts.color[nextMode]}`}</span>
+ 		</button>
+ 	{:else}
+ 		<div class="button-like">{texts.color[mode]}</div>
+ 	{/if}
+ </div>
+ 
+-<!-- 
++<!--
+ @component text inputs for the hex, rgb and hsv colors. This component cannot be imported
+ directly but can be overridden.
+ 

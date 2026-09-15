@@ -1,0 +1,92 @@
+{
+    "_local_name": "English",
+    "craigWebapp": "Craig Webapp",
+    "back": "Back",
+    "in": "in",
+    "server": {
+        "local": "Local",
+        "custom": "Custom"
+    },
+    "options": {
+        "flac": {
+            "title": "Record in FLAC",
+            "desc": "Recording directly to FLAC will make your audio almost identical to recording people individually.",
+            "disabled": "Your server does not have the FLAC mode feature. Become a patron to use this feature."
+        },
+        "continuous": {
+            "title": "Continuous Mode",
+            "desc": "Disable VAD and record everything your microphone picks up.",
+            "disabled": "Your server does not have the continuous mode feature. Become a patron to use this feature."
+        },
+        "nr": {
+            "title": "Noise Suppression",
+            "desc": "Suppresses background noise from your microphone. You can change this during recording."
+        }
+    },
+    "login": {
+        "connect": "Connect",
+        "recId": "Recording ID",
+        "webKey": "Webapp Key",
+        "server": "Server",
+        "what": "What is this?",
+        "home": "Homepage",
+        "privacy": "Privacy Policy",
+        "tos": "Terms of Service",
+        "errors": {
+            "notFound": "This recording was not found. Make sure your recording has the webapp enabled.",
+            "invalidKey": "The webapp key to this recording is invalid.",
+            "noID": "No Recording ID provided.",
+            "noKey": "No Webapp Key provided."
+        }
+    },
+    "onboarding": {
+        "join": "Join",
+        "joining": "Joining",
+        "nickLabel": "What should I call you?",
+        "nickPlaceholder": "Nickname",
+        "requesting": "Requesting for permission…",
+        "record": "Record",
+        "recordDesc": "Join the recording session as a user",
+        "monitor": "Monitor",
+        "monitorDesc": "Check when people are being recorded",
+        "noAudio": {
+            "title": "I can't use your microphone!",
+            "desc": "Click the icon next to the URL bar, enable the microphone permission, and reload the page."
+        },
+        "errors": {
+            "audioPerm": "Error while requesting for audio permission",
+            "badNick": "Invalid nickname.",
+            "badServer": "Invalid server."
+        }
+    },
+    "rec": {
+        "viaWeb": "(via Webapp)",
+        "noUsersConnected": "No users connected…",
+        "connectedAs": "Connected as",
+        "continuous": "Continuous",
+        "mute": "Mute",
+        "unmute": "Unmute",
+        "disconnect": "Disconnect",
+        "microphone": "Microphone"
+    },
+    "modal": {
+        "disconnected": "Disconnected.",
+        "disconnectedBody": "Your connection to the server was lost.",
+        "reason": "Reason",
+        "reload": "Reload",
+        "errors": {
+            "CLOSED": "The connection to the server was closed.",
+            "SHARD_CLOSED": "The recording's connection unexpectedly closed.",
+            "RECORDING_ENDED": "The recording has ended.",
+            "INVALID": "The server couldn't process our data somehow!",
+            "INVALID_MESSAGE": "The server couldn't process our data somehow!",
+            "INVALID_ID": "The ID sent to the server was invalid!",
+            "INVALID_FLAGS": "The flags sent to the server was invalid!",
+            "INVALID_TOKEN": "The token sent to the server was invalid!",
+            "INVALID_USERNAME": "The username sent to the server was invalid!",
+            "INVALID_CONNECTION_TYPE": "The connection type sent to the server was invalid!",
+            "NOT_FOUND": "The recording no longer is connected to the server!",
+            "ALREADY_CONNECTED": "Too many people are connected to this recording!"
+        }
+    }
+}

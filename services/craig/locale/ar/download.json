@@ -1,0 +1,41 @@
+{
+    "modal_content": {
+        "download_avatar_fail": "فشل تحميل صور الحسابات.",
+        "download_fail": "فشل التحميل في صيغة {{format}}.",
+        "downloading_avatar": "تحميل صور الحسابات…",
+        "downloading": "جاري تحميل في صيغة {{format}}…",
+        "duration_fail": "عطل في معرفة طول التسجيل!"
+    },
+    "modal": {
+        "download_fail": "فشل التحميل!",
+        "duration_fail": "عطل في معرفة طول التسجيل!",
+        "ennuizel": "إحذر الزرائر الحمراء!",
+        "delete_rec": "حذف التسجيل؟",
+        "error": "حدث عطل.",
+        "general": "واجة"
+    },
+    "footer": {
+        "build": "الإصدار",
+        "showing_hidden": "مععروض المخفي"
+    },
+    "info": {
+        "users": "المستخدمين",
+        "channel": "القناة",
+        "delete_rec": "أحذف التسجيل",
+        "duration": "الطول",
+        "server": "الخادم",
+        "expires": "يصلح هذا التسجيل إلى {{expire}}.",
+        "started": "بدأ",
+        "req_by": "طلب من",
+        "rec_id": "رقم التسجيل"
+    },
+    "still_downloading": "تسجيلك لا يزال يحمل! التحميل سيستمر إن غادرت, لكن لن تستطيع ان ترى التقدم أو تحمل تسجيل آخر الى أن ينتهي هذا التسجيل.",
+    "reveal": "إكشف",
+    "delete": "إحذف",
+    "cancel": "الغاء",
+    "close": "اغلق",
+    "_local_name": "عربى",
+    "downloading": "جاري التحميل…",
+    "loading": "تحميل…",
+    "craig_rec": "كرايج يسجل"
+}

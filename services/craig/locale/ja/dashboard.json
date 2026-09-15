@@ -1,0 +1,112 @@
+{
+    "name": "日本語",
+    "footer": {
+        "privacy": "プライバシーポリシー",
+        "tos": "利用規約"
+    },
+    "common": {
+        "cancel": "キャンセル",
+        "delete": "削除",
+        "remove": "取り除く",
+        "okay": "了解",
+        "download": "ダウンロード",
+        "nevermind": "やっぱりやめる",
+        "language": "言語",
+        "avatar": "アバター",
+        "close": "閉じる",
+        "loading": "読み込み中…",
+        "dismiss": "無視する",
+        "new": "新規",
+        "disconnect": "割引",
+        "connect": "接続",
+        "profile": "プロフィール",
+        "save": "保存",
+        "manage": "管理",
+        "logout": "ログアウト"
+    },
+    "format_sections": {
+        "mt": "マルチトラック",
+        "stsm": "シングルトラック、スムーズ合成"
+    },
+    "format_buttons": {
+        "audacity": "Audacityプロジェクト",
+        "adobe_audition": "Adobeオーディションセッション",
+        "plain_text": "プレーンテキスト",
+        "srt": ".srt(字幕ファイル)"
+    },
+    "errors": {
+        "invalid_format": "誤った形式です。",
+        "unknown": "不明なエラーが発生しました。後で試してください。",
+        "invalid_body": "誤ったリクエストがサーバーに送信されました。通常このメッセージが表示されることはありません。問題が解決しない場合はページを再読み込みしてください。",
+        "server_error": "サーバーエラーが発生しました。また後でお試しください。",
+        "login": "この操作にはログインが必要です。",
+        "unauthorized": "ログインが失効しました。ページを再読込してください。",
+        "feature_unavailable": "あなたの利用できない機能が要求されました。",
+        "not_supporter": "この操作にはサポーターティアが必要です。",
+        "need_higher_tier": "この操作にはより上位のサポーターティアが必要です。"
+    },
+    "survey": {
+        "text": "Craigをより良くするための簡単なアンケートにご協力ください。",
+        "cta": "アンケートに協力"
+    },
+    "login_page": {
+        "header": "DiacordでログインしてCraigダッシュボードにアクセス",
+        "disclaimer": "ログイン状態の維持のためにCookieを使用します。ログインすることで利用に同意したものとします。",
+        "login": "Discordでログイン"
+    },
+    "headers": {
+        "supporter_status": "サポーターステータス",
+        "cloud_backup": "クラウドバックアップ"
+    },
+    "supporter_tiers": {
+        "0": "サポーターティアなし",
+        "10": "ティア1サポーター",
+        "20": "ティア2サポーター",
+        "30": "ティア3サポーター",
+        "100": "MP3の神",
+        "-1": "大いなるイタチ"
+    },
+    "supporter_status": {
+        "dev_tier": "開発者がこのティアをプレゼントしました！",
+        "manage": "サブスクリプションを管理",
+        "cta": "サポーターになる！",
+        "feature_available_in": "この機能は {tier} で利用可能です。"
+    },
+    "supporter_troubleshoot": {
+        "header": "最近支援者になりましたか？",
+        "line_1": "Patreon自体をを通じてあなたのDiscordアカウントが紐付けられていれば、特典が自動的に適用されます。また、ここからPatreonアカウントを接続すればあなたのティアが利用できます。",
+        "line_3": "特典が適用されていませんか？ {support_server}にお問い合わせください。",
+        "support_server": "サポート",
+        "line_2": "録音に使用しているDiscordアカウントと、支援を行っているPatreonアカウントが正しく連携されていることをご確認ください。"
+    },
+    "disconnect_patreon": {
+        "header": "Patreonアカウントを連携解除してもよろしいですか？",
+        "text": "Patreonアカウントとの連携を解除すると特典は利用できなくなります。"
+    },
+    "connection_errors": {
+        "NO_ACCESS_TOKEN": "{service}からアクセス権限が取得できませんでした。また後でお試しください。",
+        "NO_USER_DATA": "{service}からユーザーデータを取得できませんでした。また後でお試しください。",
+        "INVALID_SCOPE": "Craigに必要権限の一部みが許可されています。すべての権限が確認されるまで{service}は利用できません。",
+        "USER_ID_MISMATCH": "現在ログイン中のDiscordアカウントはあなたのPatreonアカウントで紐付けされたもとと異なります。Patreonの設定でDiscordアカウントの連携を変更してから再度お試しください。"
+    },
+    "connection_responses": {
+        "account_linked": "あなたの{service}アカウントと連携しました。",
+        "connect_failed": "あなたの{service}アカウントに接続できませんでした。"
+    },
+    "cloud_backup": {
+        "enable": "クラウドバックアップを有効にする",
+        "exclude_bots": "アプリ(ボット)を除外",
+        "exclude_bots_desc": "ダウンロードファイルからDiscordのアプリ(ボット)の音声を取り除きます。",
+        "include_transcription": "文字起こしを含める",
+        "enable_desc": "Craigが録音を連携先のクラウドストレージに自動でバックアップすることを許可します。この設定は、あなたが開始した録音に限り有効です。",
+        "select_service": "バックアップ先のクラウドストレージを選択",
+        "select_format": "バックアップ形式を選択",
+        "upload_service": "バックアップ先サービス",
+        "upload_format": "バックアップ形式",
+        "disconnected_service": "{service} から連携解除しました",
+        "revoke_app_perms": "{service} の設定から権限を取り消す必要があるかもしれません。",
+        "view_settings": "設定を見る",
+        "settings_error": "設定の更新に失敗しました",
+        "upload_options": "バックアップオプション"
+    }
+}

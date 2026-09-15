@@ -1,0 +1,274 @@
+{
+    "name": "English",
+    "common": {
+        "close": "Close",
+        "cancel": "Cancel",
+        "delete": "Delete",
+        "remove": "Remove",
+        "avatar": "Avatar",
+        "okay": "Okay",
+        "download": "Download",
+        "nevermind": "Nevermind",
+        "loading": "Loading…",
+        "downloading": "Downloading…",
+        "show_all": "Show all",
+        "show_less": "Show less",
+        "language": "Language",
+        "app": "App",
+        "new": "New",
+        "beta": "Beta",
+        "dismiss": "Dismiss",
+        "format": "Format",
+        "processing": "Processing…"
+    },
+    "recording": {
+        "reveal_duration": "Reveal Duration",
+        "rec": "REC",
+        "live_warning": {
+            "title": "Recording in Progress",
+            "description": "This recording is still in progress. Processing the recording now will give you a partial export of the audio recorded so far."
+        },
+        "redacted_warning": {
+            "title": "Recording Redacted",
+            "description": "One or more users requested removal from this recording. Their identifying information was removed and their audio was replaced with silence."
+        },
+        "delete": "Delete recording",
+        "expires_soon": "Expires soon",
+        "expires_in": "Expires {expiry}",
+        "recording_id": "Recording ID",
+        "users_recorded": "{count, plural,\n  one {{count, number} User Recorded}\n  other {{count, number} Users Recorded}\n}",
+        "recording_date": "Recorded on {date, date, all}",
+        "by_user": "{channel} by {user}",
+        "via_bot": "via {bot}",
+        "delete_modal": {
+            "header": "Are you sure you want to delete this recording?",
+            "subtext": "This action is IRREVERSABLE and nobody can help you get it back.",
+            "delete_key": "Delete Key",
+            "delete_key_invalid": "The delete key you provided is invalid.",
+            "delete_key_hint": "Your delete key can be found in your DMs or when running the {command} command.",
+            "confirm": "Yes, delete this recording"
+        }
+    },
+    "color_picker": {
+        "h": "Hue channel",
+        "s": "Saturation channel",
+        "v": "Brightness channel",
+        "r": "Red channel",
+        "g": "Green channel",
+        "b": "Blue channel",
+        "a": "Alpha channel",
+        "hex": "HEX color",
+        "without_color": "without color",
+        "change_to": "Change to {mode}"
+    },
+    "download": {
+        "no_users": "No users in recording.",
+        "show_all_formats": "Show all formats",
+        "active_download_description": "A download is currently being processed, and must be finished before downloading again.",
+        "no_users_description": "No users are in this recording yet. People are added into the recording when they speak. Check the recording panel to confirm when someone is in the recording. If there are issues, switch the voice region or restart the recording.",
+        "wdiu": {
+            "name": "Which do I use?",
+            "content": "Buttons under Multi-track will export your recording in a ZIP file with each track, or sound file, having each persons voice in it, already synced up to each other.\n\nButtons under Single-track will merge all those tracks into one file.\n\nIf you want an easy way to edit your audio, you can install and use {audacity} (or any forks of it) and download the Audacity Project format.\n\nIf you are an Apple user, you may want to use the {aac} format.\n\nIn all other cases, {flac} is a widely supported format that will work best for you."
+        },
+        "sections": {
+            "downloads": "Downloads",
+            "audio": "Audio",
+            "avatars": "Avatars",
+            "mt": "Multi-track",
+            "st": "Single-track",
+            "stsm": "Single-track Smart Mix",
+            "local_processing": "Local Processing",
+            "transcription": "Transcription",
+            "minizel": "In-Browser Processing"
+        },
+        "format_buttons": {
+            "audacity": "Audacity Project",
+            "adobe_audition": "Adobe Audition Session",
+            "win_executable": "Windows Executable",
+            "mac_script": "Mac Script",
+            "unix_script": "Unix Script",
+            "other": "Other",
+            "plain_text": "Plain Text",
+            "srt": "SubRip Text"
+        },
+        "modal": {
+            "header": "Ready to download?",
+            "subtext": "Your download will be given in the form of a {file} file.",
+            "description": {
+                "project": "This file is intended to be used with the {software} software. In order to open this file, extract all contents of the ZIP file and open the project by clicking the {file} file.",
+                "zip": "Users audio tracks are separated into {file} files.",
+                "mix": "All audio tracks are mixed into a single {file} file.",
+                "executable": "Craig will create a portable executable where your audio will be packed into. Running the executable will allow you to process the audio data however you'd like. Note that as this executable is not signed, it may give false positives to anti-virus programs.",
+                "script": "Craig will create an audio processor script that allows you to process your audio however you'd like. Extract the contents of the ZIP file before running the script.",
+                "linux_script": "Craig will create an audio processor script that allows you to process your audio however you'd like. Extract the contents of the ZIP file before running the script. You will need to have FFMpeg installed on your device.",
+                "raw": "This downloads the raw.dat file that is usually included with every multi-track download. This is the raw Opus data received by Craig. Most audio programs may not properly support this.",
+                "infotxt": "This downloads the info.txt file that is usually included with every multi-track download. This gives general information about the recording.",
+                "transcription_txt": "This makes a plain text transcription file for everyone in the recording. Each line says the speaker's name along with the line they spoke in order.",
+                "transcription_vtt": "This makes a WebVTT transcription file for everyone in the recording. This also includes per-word timings for each speaker. WebVTT is a widely supported format for modern software.",
+                "transcription_srt": "This makes a SubRip Text transcription file for everyone in the recording. SubRip Text (or SRT) is a widely supported format."
+            },
+            "normalize_audio": "Normalize audio",
+            "runpod_warn": "We use {runpod} to handle processing transcriptions using {whisper}. You may be subject to their terms."
+        },
+        "ennuizel_modal": {
+            "header": "Beware of the red buttons!",
+            "description": "Buttons that have a red border use audio processing in your browser using Ennuizel. Depending on your browser, it may be unsupported or take up a good amount of RAM to process your recording. If you have any problems, choose a different format.",
+            "confirm": "I understand",
+            "selected_format": "Selected Format"
+        },
+        "avatar_zip": {
+            "button_name": "Download Avatars",
+            "button_description": "Get the avatars of all participants of this recording in a ZIP file.",
+            "success": "Downloaded avatars.",
+            "fail": "Failed to download avatars."
+        },
+        "avatar_overlays": {
+            "name": "Avatar Overlays",
+            "button_name": "Create Avatar Overlays",
+            "button_description": "Make avatar overlay assets that can be used in video projects.",
+            "help_button": "What's this?",
+            "help": "Avatar Overlays are small videos that can be used in larger video projects. Each separate overlay has a ring that glows when that person talks. Each overlay is 160x160 and does not include audio. Webapp users will have the default Discord avatar.",
+            "transparency_mkv": "MPEG-4 does not support transparency, so both a static PNG image and an MKV representing the alpha (transparency) channel will be sent. Most video editors can be instructed to use one file for color and another file for alpha (transparency).",
+            "transparency_webm": "WebM supports transparency, but most video editors do not support WebM.",
+            "options": {
+                "bg": "Background Color",
+                "fg": "Ring Color",
+                "transparent": "Transparent Background",
+                "format": "Format"
+            }
+        },
+        "exclude_user": {
+            "name": "Exclude Users",
+            "exclude_from_normalization": "Exclude Users from Normalization",
+            "count": "{count, plural,\n  one {{count, number} user excluded}\n  other {{count, number} users excluded}\n}",
+            "all_excluded_warning": "At least one user should be included.",
+            "all_excluded_normalization_warning": "If you want to exclude everyone from normalization, just turn normalization off!"
+        },
+        "minizel": {
+            "title": "In-Browser Processing",
+            "mix_description": "This will download and process the raw recording data in your browser, mixing all tracks into a single audio file.",
+            "multi_description": "This will download and process the raw recording data in your browser, creating a separate audio file for each user.",
+            "download_pause_warning": "The download may temporarily pause to wait for processing.",
+            "selecting": "Select where to save…",
+            "start": "Start Processing",
+            "cancel": "Cancel",
+            "elapsed": "Elapsed",
+            "downloaded": "Downloaded",
+            "buffered": "Buffered",
+            "written": "Written",
+            "track": "Track",
+            "position": "Position",
+            "progress": "Progress",
+            "writing": "Writing",
+            "write_speed": "Write Speed",
+            "processing_desc": "Encoding and writing audio files",
+            "excluded": "Excluded",
+            "complete": "Processing Complete",
+            "complete_message": "Your audio files have been saved successfully!",
+            "complete_stats": "Completed in {time}, wrote {size}",
+            "error": "Processing Error",
+            "error_message": "An error occurred while processing your recording."
+        }
+    },
+    "notification": {
+        "body": "Recording for {guild}",
+        "job": {
+            "complete": "Download Ready",
+            "error": "Download Errored",
+            "cancelled": "Download Cancelled"
+        },
+        "bell": {
+            "unavailable": "Your browser has notifications disabled!",
+            "enable": "Notify me when this completes",
+            "disable": "Disable notifications"
+        }
+    },
+    "job": {
+        "previous_download": "Previous Download",
+        "duration": "took {duration}",
+        "tracks_status": "{finishedCount, plural,\n  one {{finishedCount, number} track}\n  other {{finishedCount, number} tracks}\n} finished, {waitingCount, plural,\n  one {{waitingCount, number} track}\n  other {{waitingCount, number} tracks}\n} waiting",
+        "loading_track": "Loading a track…",
+        "queued_description": "Your recording has been queued to be processed…",
+        "queue_position": "(in position #{position})",
+        "download_complete": "Your download has finished processing and should prompt to download shortly! If you did not get prompted to download your recording, click the \"Download\" button below.",
+        "cancelled_job": "Cancelled download.",
+        "removed_job": "Removed download.",
+        "too_many_connections": "Too many users are viewing this recording right now. Live updates are disabled and updates may take longer to show up.",
+        "polling_warning": "Changes to this process may not be immediate as there are too many users viewing it.",
+        "transcription_queued": "Transcription Request Queued",
+        "status": {
+            "queued": "Queued",
+            "cancelled": "Download Cancelled",
+            "error": "Download Errored",
+            "complete": "Finished",
+            "idle": "Waiting…"
+        },
+        "state_type": {
+            "starting": "Starting…",
+            "processing": "Processing…",
+            "encoding": "Encoding…",
+            "writing": "Writing…",
+            "uploading": "Uploading…",
+            "transcribing": "Transcribing…",
+            "finalizing": "Finalizing…"
+        },
+        "track_state": {
+            "waiting": "Waiting…",
+            "processing": "Processing…",
+            "done": "Done"
+        },
+        "status_time": {
+            "started": "Started {time}",
+            "queued": "Queued {time}",
+            "processed": "Processed {time}"
+        }
+    },
+    "supporter_block": {
+        "tiers": {
+            "0": "No Supporter Tier",
+            "10": "Tier 1 Supporter",
+            "20": "Tier 2 Supporter",
+            "30": "Tier 3 Supporter",
+            "100": "MP3 God",
+            "-1": "Greater Weasel"
+        },
+        "feature_available_in": "This feature is available in {tier}.",
+        "cta": "Become a Supporter!"
+    },
+    "errors": {
+        "generic": {
+            "duration": "An issue occurred when trying to get the duration of the recording, try again later."
+        },
+        "unknown": "An unknown error occurred, try again later.",
+        "server_error": "A server error occurred, try again later.",
+        "invalid_body": "We sent an invalid request to the server, you probably shouldn't see this. Reload the page if this issue persists.",
+        "no_key": "A key is required.",
+        "invalid_rec": "The given recording ID is invalid.",
+        "no_rec": "The recording was not found, or the recording has expired.",
+        "invalid_key": "The given key was invalid.",
+        "rec_no_data": "This recording has no data and may have been deleted manually.",
+        "recording_deleted": "This recording was manually deleted on {deletedAt, date, all}.",
+        "kitchen_down": "The processing service is unavailable or down for maintenance. Try again later.",
+        "job_exists": "A processing task already exists for this recording.",
+        "no_job": "This recording currently does not have a running processing task.",
+        "invalid_format": "An invalid format was provided.",
+        "feature_unavailable": "You requested to use a feature that can't be used on this recording.",
+        "invalid_track": "An invalid track was referenced.",
+        "no_tracks_given": "At least one track should be able to be processed.",
+        "invalid_delete_key": "The given delete key was invalid."
+    },
+    "footer": {
+        "build": "Build",
+        "support_server": "support server",
+        "beta": "This is a beta version of the new download page! Join the {support_server} to report issues.",
+        "privacy": "Privacy Policy",
+        "tos": "Terms of Service"
+    },
+    "survey": {
+      "text": "Please take this quick survey and give some feedback about Craig.",
+      "cta": "Take the Survey"
+    },
+    "maintenance": {
+        "status_page": "Status Page"
+    }
+}

@@ -1,0 +1,47 @@
+{
+  "name": "@craig/kitchen",
+  "version": "1.0.0",
+  "type": "module",
+  "exports": "./dist/index.js",
+  "license": "MIT",
+  "scripts": {
+    "start": "dotenv -e ../../.env -e .env -c -- node dist/index.js",
+    "inspect": "dotenv -e ../../.env -e .env -c -- node --inspect=7001 dist/index.js",
+    "start-pm2": "dotenv -e ../../.env -e .env -c -- pm2 start ecosystem.config.cjs",
+    "reload-pm2": "dotenv -e ../../.env -e .env -c -- pm2 restart ecosystem.config.cjs --update-env",
+    "build": "rimraf dist && tsc",
+    "build-cook": "./scripts/build_cook.sh",
+    "dev": "dotenv -e ../../.env -e .env -c -- tsx src/index",
+    "lint": "eslint .",
+    "format": "eslint . --fix"
+  },
+  "dependencies": {
+    "@craig/common": "workspace:*",
+    "@craig/db": "workspace:*",
+    "@craig/logger": "workspace:*",
+    "@craig/metrics": "workspace:*",
+    "common-tags": "catalog:",
+    "cron": "catalog:",
+    "dropbox": "^10.34.0",
+    "eventemitter3": "^5.0.1",
+    "execa": "catalog:",
+    "fastify": "^5.12.1",
+    "googleapis": "^176.0.0",
+    "he": "^1.2.0",
+    "ioredis": "catalog:",
+    "just-range": "^4.2.0",
+    "just-throttle": "^4.2.0",
+    "just-zip-it": "^3.2.0",
+    "ms": "^2.1.3",
+    "nanoid": "catalog:"
+  },
+  "devDependencies": {
+    "@craig/types": "workspace:*",
+    "@types/common-tags": "catalog:",
+    "@types/he": "^1.2.3",
+    "@types/ms": "^2.1.0",
+    "@types/node": "catalog:",
+    "tsx": "catalog:",
+    "typescript": "catalog:"
+  }
+}

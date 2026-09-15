@@ -1,0 +1,53 @@
+{
+  "name": "Deutsch",
+  "common": {
+    "close": "Schließen",
+    "cancel": "Abbrechen",
+    "delete": "Löschen",
+    "download": "Download",
+    "loading": "Wird geladen…",
+    "downloading": "Wird heruntergeladen…"
+  },
+  "recording": {
+    "delete": "Aufnahme löschen",
+    "recording_id": "Aufnahmen ID",
+    "delete_modal": {
+      "header": "Bist du dir sicher, dass du diese Aufnahme löschen willst?",
+      "subtext": "Die Löschung kann NICHT RÜCKGÄNGIG GEMACHT WERDEN und keiner kann dir helfen die Aufnahme zurück zu erhalten."
+    }
+  },
+  "download": {
+    "sections": {
+      "downloads": "Downloads",
+      "avatars": "Avatare",
+      "mt": "Mehrspurig",
+      "st": "Einspurig, abgemischt",
+      "stsm": "Einspuriger Smart Mix",
+      "local_processing": "Lokales verarbeiten"
+    },
+    "format_buttons": {
+      "audacity": "Audacity Projekt",
+      "win_executable": "Windows Applikation",
+      "unix_script": "Unix Script",
+      "other": "Andere"
+    },
+    "ennuizel_modal": {
+      "header": "Achte auf rote Buttons!",
+      "description": "Buttons welche einen roten Rahmen haben benötigen eine Audio Verarbeitung über Ennuizel über deinen Browser. Abhängig von deinem Browser kann dieser nicht unterstützt sein oder eine ordentliche Menge deines RAMs benötigen um deine Aufnahme zu verarbeiten. Wenn du andere Probleme hast, nutze bitte ein anderes Format.",
+      "confirm": "Ich verstehe"
+    }
+  },
+  "avatar_overlays": {
+    "options": {
+      "bg": "Hintergrundfarbe",
+      "fg": "Overlayfarbe",
+      "transparent": "Transparenter Hintergrund",
+      "format": "Format"
+    }
+  },
+  "footer": {
+    "build": "Version",
+    "tos": "AGB",
+    "privacy": "Datenschutzbestimmungen"
+  }
+}

@@ -1,0 +1,446 @@
+{
+    "responses": {
+        "guild_only": "This command can only be used in a guild.",
+        "banned": "You are not allowed to use the bot at this time.",
+        "ratelimited": "You are running commands too often! Try again in a few seconds.",
+        "unknown_subcommand": "Unknown sub-command.",
+        "guild_unavailable": "This server is currently unavailable to me, try re-inviting this bot. If the issue persists, join the [support server]({server_invite}).",
+        "supporter_required": "If you have recently became a supporter, login to the [dashboard]({dashboard_url}).\nYour benefits may take up to an hour to become active.",
+        "not_your_button": "Only the person who executed this command can use this button.",
+        "interaction_error": "An error occurred while using this interaction.",
+        "recording_in_progress": "A recording or voice test is already in progress in this server.",
+        "could_not_message": "I couldn't create a message in this channel."
+    },
+    "common": {
+        "support_server": "Support Server",
+        "add_to_server": "Add to Server",
+        "supporter_cta": "Become a Supporter",
+        "how_fix": "How do I fix this?",
+        "cancel": "Cancel",
+        "note": "Note",
+        "dashboard": "Dashboard",
+        "download": "Download",
+        "recordings": "Recordings",
+        "rec_id": "Recording ID",
+        "channel": "Channel",
+        "guild": "Guild",
+        "started": "Started",
+        "voice_region": "Voice Region",
+        "voice_latency": "Voice Server Latency",
+        "activity": "Activity",
+        "delete_key": "Delete key",
+        "webapp_url": "Webapp URL",
+        "click_to_show": "(click to show)",
+        "try_again_later": "Please try again later.",
+        "loading": "Loading…"
+    },
+    "info": {
+        "text": "**Craig** is a multi-track voice channel recorder.\nI am in **{guilds, number}** guilds and currently recording **{recordings, number}** conversations.\n-# This is from shard {shard} with {ms} milliseconds of latency."
+    },
+    "blessing": {
+        "already_blessed": "You already blessed this server.",
+        "remove": "Remove blessing",
+        "no_perks": "You don't have any perks to bless this server with.",
+        "server_already_blessed": "This server has already been blessed by a similar or greater tier.",
+        "blessed": "You have blessed this server and gave it your perks. All future recordings will have your benefits.",
+        "not_blessed": "You have not blessed this server.",
+        "removed": "Removed your blessing from this server.",
+        "bless_error": "An error occurred while blessing the server.",
+        "unbless_error": "An error occurred while removing the blessing from the server."
+    },
+    "join_command": {
+        "specify_channel": "Please specify a channel to record in, or join a channel.",
+        "not_voice_channel": "That channel is not a voice channel.",
+        "supporter_only": "Sorry, but this bot is only for supporters. Please use Craig.",
+        "cant_dm": "I can't DM you, so I can't record. I need to be able to DM you to send you the download link.",
+        "cant_dm_footer": "To bring up the recording link again, use the `/recordings` command.",
+        "dm_unavailable": "I was unable to send you a DM with the download link. I need to be able to DM you to send you the download link in the future.",
+        "nick_changing": "It's taking a while for me to change my nickname to indicate that I'm recording.\nI cannot start recording until I've changed my nickname. Please be patient.",
+        "nick_error": "An error occurred while changing my nickname",
+        "need_nick_perms": "I do not have permission to change my nickname. I will not record without this permission.",
+        "voice_test_ongoing": "You must finish the voice test before starting a recording.",
+        "exists": "Already recording in this server.",
+        "started": "Started recording in {channel}.",
+        "maintenance": "The bot is currently undergoing maintenance.",
+        "delete_recording": "Delete recording",
+        "info_header": "Started recording in {channel} at {time}.",
+        "info_header_auto": "Started auto-recording in {channel} at {time}.",
+        "info_panel_reminder": "-# You can bring up the recording panel with `/join`.",
+        "info_footer": "I will record up to {record_hours} hours, I'll stop recording {record_time} from now.\nThis recording will expire {expire_time}. ({expiry_days} days from now)\n-# The audio can be downloaded even while I'm still recording.",
+        "actions": {
+            "jump_to_panel": "Jump to recording panel",
+            "jump_to_dm": "Jump to DM"
+        }
+    },
+    "stop_command": {
+        "no_recording": "There is no recording to stop.",
+        "stopped": "Stopped recording."
+    },
+    "autorecord": {
+        "stopped_from_no_users": "Autorecord stopped due to lack of users.",
+        "need_perms": "You need the \"Manage Server\" permission or have an access role to manage auto-recordings.",
+        "not_recorded": "The channel {channel} is not auto-recorded.",
+        "unknown_channel": "Unknown channel",
+        "none": "*None*",
+        "view_channel": "**Channel:** {channel}\n**Created by:** {user}\n**Minimum members:** {minimum}\n**Trigger roles:** {roles}\n**Trigger users:** {users}\n**Updated at:** {updated_at}",
+        "no_channels": "There are no auto-recorded channels.",
+        "channels_title": "Auto-recorded Channels",
+        "minimum": "{count} minimum",
+        "roles": "{count} role(s)",
+        "users": "{count} user(s)",
+        "posting_to": "posting to {channel}",
+        "supporter_required": "Sorry, but this feature is only for Tier 2 supporters ($4 patrons).\n\n> **Note:** You can still record regularly with the `/join` command.",
+        "need_trigger": "You need to at least set a minimum user amount or add a user/role trigger.",
+        "everyone_trigger": "The `@everyone` role cannot be used as a trigger role.",
+        "limit_reached": "You can only have {limit} auto-recordings at a time.",
+        "activated": "Auto-recording on {channel} has been activated. Please make sure you can receive DMs from me.",
+        "not_found": "No auto-recording found on {channel}.",
+        "deactivated": "Auto-recording on {channel} has been deactivated.",
+        "pruned": "Pruned {count} auto-record rules for non-existent channels."
+    },
+    "server_settings": {
+        "need_perms": "You need the \"Manage Server\" permission to change server settings.",
+        "title": "Server Settings",
+        "none": "*None*",
+        "view": "**Access Roles:** {roles}",
+        "already_access_role": "This role is already an access role.",
+        "added_access_role": "Added role {role} to access roles.",
+        "not_access_role": "This role is not an access role.",
+        "removed_access_role": "Removed {role} from access roles."
+    },
+    "recordings": {
+        "none": "You haven't done any recordings recently on {bot}.",
+        "list_header": "## Previous recordings on {bot}\n-# {count} recording(s), Page {page}/{pages}",
+        "expires": "Expires {in_time}",
+        "autorecorded": "*`Autorecorded`*"
+    },
+    "features": {
+        "title": "Features",
+        "your_perks": "Your Perks",
+        "server_perks": "Server Perks",
+        "no_server_perks": "This server has no perks; you can bless this server.",
+        "bless_server": "Bless server",
+        "blessed_by": "(Blessed by {user})",
+        "unknown_tier": "Tier {tier}",
+        "reward_details": "__**{tier}**__ {blessed_by}\nRecord Duration Limit: {record_hours} hours\nDownload Expiration: {expiry_days} days\n\n{features}",
+        "tiers": {
+            "-1": "Greater Weasel",
+            "0": "Default",
+            "10": "Tier 1",
+            "20": "Tier 2",
+            "30": "Tier 3",
+            "100": "MP3 God"
+        },
+        "feature": {
+            "mix": "Smart Mix",
+            "auto": "Auto-recording",
+            "drive": "Cloud Backup",
+            "glowers": "Avatar Overlays",
+            "eccontinuous": "Continuous Mode via Webapp",
+            "ecflac": "FLAC via Webapp",
+            "mp3": "Exporting to MP3",
+            "transcription": "Transcription"
+        }
+    },
+    "recording": {
+        "start_error": "An error occurred while trying to start the recording. Try again in a few minutes.\nIf this problem persists, please join the support server with the button below.",
+        "not_recording": "You aren't recording in this server.",
+        "not_found": "That recording was not found or may have already ended.",
+        "need_perms": "You need the \"Manage Server\" permission or have an access role to manage or start recordings.",
+        "cant_connect": "I do not have permission to connect to {channel}.",
+        "channel_full": "{channel} is full, and I do not have the \"Move Members\" permission needed to join it.",
+        "need_embed": "I need the \"Embed Links\" permission in {channel} to be able to display information.",
+        "need_view_channel": "I need the \"View Channel\" permission in {channel} to be able to display information.",
+        "connect_fail": "Failed to connect to your channel, try again later.",
+        "went_unavailable": "This guild went unavailable during recording! To prevent further errors, this recording has ended.",
+        "actions": {
+            "stop": "Stop recording",
+            "note": "Add a note"
+        },
+        "panel": {
+            "info": {
+                "owner": "{user}'s recording"
+            },
+            "maintenance": "The bot is undergoing maintenance, recording will be stopped.",
+            "recording": "Recording…",
+            "connecting": "Connecting…",
+            "reconnecting": "Reconnecting…",
+            "error": "An error occurred.",
+            "ended": "Recording ended.",
+            "added_note": "{user} added a note.",
+            "webapp_fail": "Failed to connect to the webapp!",
+            "joined": "{user} joined the recording.",
+            "webapp_connected": "{name} has connected from the webapp.",
+            "stopped": "Recording stopped by {user}.",
+            "no_audio": "I haven't received any audio from anyone!",
+            "connect_fail": "Failed to connect!",
+            "reconnect_fail": "Failed to reconnect after 3 tries.",
+            "deafened": "I was deafened!",
+            "undeafened": "I was undeafened.",
+            "reconnected": "Reconnected.",
+            "auto_reconnected": "Automatically reconnected.",
+            "high_latency": "High voice server latency: {latency}ms, this may cause issues with the recording.",
+            "discord_requested_reconnect": "Discord requested us to reconnect, reconnecting…",
+            "disconnected_from_error": "An error has disconnected me, reconnecting…",
+            "vc_closed": "The voice connection was closed, disconnecting… ([why?](https://link.snaz.in/craigstopped))",
+            "corrupt_data": "{user} has corrupt data! I will not be able to correctly process their audio!",
+            "footer": "Is this panel stuck? Try running `/join` again for a new recording panel."
+        },
+        "e2ee_error": "Due to voice encryption issues, I could not properly hear anyone. Please switch this channel's voice region and restart the recording.",
+        "moved": "I was moved to another channel! If you want me to leave, please press the stop button.",
+        "deafened": "The bot has been deafened! Please undeafen me to continue recording.",
+        "failed_to_reconnect": "I could not reconnect properly to the voice channel after 3 tries. Please restart the recording, and if this problem persists, please join the [support server](<https://discord.gg/craig>).",
+        "failed_to_connect": "Failed to connect to your channel, try again later. If the issue persists, report it in the [support server](<https://discord.gg/craig>).",
+        "time_limit_reached": "You've reached the maximum time limit of {hours} hours for this recording.",
+        "size_limit_reached": "The recording has reached the size limit and has been automatically stopped.",
+        "no_audio_stop": "I haven't received any audio from anyone in this recording, try switching to a different voice region if this problem persists.",
+        "no_audio_warn": "Hello? I haven't heard anything for five minutes. Make sure to stop the recording if you are done! If you are taking a break, disregard this message.",
+        "added_note": "Added the note to the recording!",
+        "note_error": "An error occurred while adding the note.",
+        "note_modal": {
+            "title": "Add a note to this recording",
+            "placeholder": "Chapter 1, Part 1, etc."
+        }
+    },
+    "upload": {
+        "failed_title": "Failed to upload to {service}",
+        "uploaded": "Recording `{recording_id}` was uploaded to {service}.",
+        "open": "Open in {service}",
+        "cancelled": "The download was cancelled, possibly due to server maintenance.",
+        "process_error": "An error occurred while creating the download.",
+        "error": "An error occurred while uploading.",
+        "microservice_error": "Unable to connect to the Cloud Backup microservice.",
+        "fail_message_end": "You will need to manually upload your recording (`{recording_id}`) to {service}.",
+        "errors": {
+            "auth_invalidated": "The authentication for this service was invalidated, you may need to re-authenticate.",
+            "server_error": "An unknown server error occurred."
+        }
+    },
+    "e2ee": {
+        "not_in_channel": "You aren't in this channel.",
+        "cant_view_code": "You aren't in this voice channel right now to be able to view the privacy code.",
+        "verification_code": "Verification Code",
+        "code_since_time": "Since {time}",
+        "verification_code_error": "An error occurred when trying to get the verification code, try again later.",
+        "privacy_code": "Voice Privacy Code",
+        "header": "This voice call is {emoji} **end-to-end encrypted**, [Learn more here](https://support.discord.com/hc/en-us/articles/25968222946071-End-to-End-Encryption-for-Audio-and-Video).",
+        "unknown_code": "Unknown (might be transitioning the call, try again later)",
+        "footer": "A new code is generated when people join or leave this call.",
+        "view_verification_code": "View Verification Code"
+    },
+    "voicetest": {
+        "not_found": "That voice test was not found or may have already ended.",
+        "need_perms": "You need the \"Manage Server\" permission or have an access role to make or manage voice tests.",
+        "no_audio": "No audio was detected during the test. Please check your microphone and try again.",
+        "disconnected": "I was disconnected from the voice channel.",
+        "ratelimited": "You are doing voice tests too often! Try again in a few seconds.",
+        "not_in_channel": "You need to be in a voice channel to do a voice test.",
+        "error": "An error occurred while starting the voice test, try again later.",
+        "went_unavailable": "This guild went unavailable during a voice test! To prevent further errors, this voice test has ended.",
+        "panel": {
+            "recording": "Recording voice test…",
+            "playing": "Playing back audio…",
+            "finished": "Voice test finished.",
+            "cancelled": "Voice test cancelled.",
+            "failed": "Voice test failed!",
+            "will_end_in": "Recording will end {in_time}",
+            "stop": "Stop & Listen",
+            "no_audio": "No audio recorded!"
+        }
+    },
+    "webapp": {
+        "not_enabled": "This instance of Craig does not have a webapp.",
+        "on": "Enabled the Craig Webapp in future recordings. You should get a Webapp link in your recording DM.",
+        "off": "Disabled the Craig Webapp."
+    },
+    "botprofile": {
+        "need_perms": "You need the \"Manage Server\" permission to change the bot profile.",
+        "reset": "Reset my server profile.",
+        "reset_fail": "Could not reset my server profile. You may have updated it too frequently.",
+        "no_edit": "You didn't edit anything.",
+        "invalid_content_type": "The {item} trying to be set has an invalid content type.",
+        "supporter_required": "Sorry, but this feature is only for Tier 1 supporters ($1 patrons).",
+        "updated": "Updated my server profile.",
+        "update_fail": "Could not update my server profile; you may have updated it too frequently.",
+        "item": {
+            "avatar": "avatar",
+            "banner": "banner"
+        }
+    },
+    "commands": {
+        "autorecord": {
+            "name": "autorecord",
+            "description": "Manage auto-record settings.",
+            "options": {
+                "view": {
+                    "name": "view",
+                    "description": "View auto-recorded channels.",
+                    "options": {
+                        "channel": {
+                            "name": "channel",
+                            "description": "The channel to view."
+                        }
+                    }
+                },
+                "on": {
+                    "name": "on",
+                    "description": "Activate auto-recording on a channel.",
+                    "options": {
+                        "channel": {
+                            "name": "channel",
+                            "description": "The channel to auto-record in."
+                        },
+                        "minimum": {
+                            "name": "minimum",
+                            "description": "The minimum amount of members to auto-record on, regardless of triggers."
+                        },
+                        "triggers": {
+                            "name": "triggers",
+                            "description": "The members or roles that trigger the auto-recording. Mention users/roles inside this option."
+                        },
+                        "post-channel": {
+                            "name": "post-channel",
+                            "description": "The channel to post recording panels to when an auto-recording starts."
+                        }
+                    }
+                },
+                "off": {
+                    "name": "off",
+                    "description": "Deactivate auto-recording on a channel.",
+                    "options": {
+                        "channel": {
+                            "name": "channel",
+                            "description": "The channel to turn off auto-recording in."
+                        }
+                    }
+                },
+                "prune": {
+                    "name": "prune",
+                    "description": "Remove auto-record rules for channels that no longer exist."
+                }
+            }
+        },
+        "bless": {
+            "name": "bless",
+            "description": "Bless this server, giving it your perks."
+        },
+        "features": {
+            "name": "features",
+            "description": "List your active perks and active server perks."
+        },
+        "info": {
+            "name": "info",
+            "description": "Get information and statistics about this bot."
+        },
+        "join": {
+            "name": "join",
+            "description": "Start recording in a voice channel.",
+            "options": {
+                "channel": {
+                    "name": "channel",
+                    "description": "The voice channel to record in."
+                }
+            }
+        },
+        "note": {
+            "name": "note",
+            "description": "Note something within the ongoing recording.",
+            "options": {
+                "message": {
+                    "name": "message",
+                    "description": "The note to create."
+                }
+            }
+        },
+        "recordings": {
+            "name": "recordings",
+            "description": "Access your previous recordings."
+        },
+        "server-settings": {
+            "name": "server-settings",
+            "description": "Manage server settings.",
+            "options": {
+                "view": {
+                    "name": "view",
+                    "description": "View server settings."
+                },
+                "access-role": {
+                    "name": "access-role",
+                    "description": "Manage access roles.",
+                    "options": {
+                        "add": {
+                            "name": "add",
+                            "description": "Add an access role.",
+                            "options": {
+                                "role": {
+                                    "name": "role",
+                                    "description": "The role to add."
+                                }
+                            }
+                        },
+                        "remove": {
+                            "name": "remove",
+                            "description": "Remove an access role.",
+                            "options": {
+                                "role": {
+                                    "name": "role",
+                                    "description": "The role to remove."
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "bot-profile": {
+            "name": "bot-profile",
+            "description": "Update the bot's server profile.",
+            "options": {
+                "edit": {
+                    "name": "edit",
+                    "description": "Edit the bot's server profile.",
+                    "options": {
+                        "avatar": {
+                            "name": "avatar",
+                            "description": "The avatar to set."
+                        },
+                        "banner": {
+                            "name": "banner",
+                            "description": "The banner to set."
+                        }
+                    }
+                },
+                "reset": {
+                    "name": "reset",
+                    "description": "Reset the bot's server profile."
+                }
+            }
+        },
+        "stop": {
+            "name": "stop",
+            "description": "Stop your current recording."
+        },
+        "unbless": {
+            "name": "unbless",
+            "description": "Remove your blessing from this server."
+        },
+        "voice-test": {
+            "name": "voice-test",
+            "description": "Easily test your audio quality in a voice channel."
+        },
+        "webapp": {
+            "name": "webapp",
+            "description": "Enable/disable the Craig Webapp.",
+            "options": {
+                "on": {
+                    "name": "on",
+                    "description": "Enable the Craig Webapp in future recordings."
+                },
+                "off": {
+                    "name": "off",
+                    "description": "Disable the Craig Webapp."
+                }
+            }
+        }
+    }
+}

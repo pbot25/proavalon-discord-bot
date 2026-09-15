@@ -1,0 +1,54 @@
+{
+    "common": {
+        "support_server": "Servidor de soporte técnico",
+        "add_to_server": "Añadir al servidor",
+        "cancel": "Cancelar",
+        "note": "Nota",
+        "download": "Descargar",
+        "channel": "Canal",
+        "started": "Comenzó",
+        "activity": "Actividad",
+        "try_again_later": "Inténtalo de nuevo más tarde.",
+        "loading": "Loading…"
+    },
+    "e2ee": {
+        "verification_code": "Código de verificación",
+        "privacy_code": "Código de privacidad de voz",
+        "view_verification_code": "Ver código de verificación"
+    },
+    "recording": {
+        "actions": {
+            "stop": "Detener la grabación"
+        },
+        "panel": {
+            "recording": "Grabando…",
+            "connecting": "Conectando…",
+            "reconnecting": "Reconectando…",
+            "ended": "Grabación finalizada."
+        }
+    },
+    "botprofile": {
+        "item": {
+            "avatar": "Avatar",
+            "banner": "Cartel"
+        }
+    },
+    "voicetest": {
+        "panel": {
+            "will_end_in": "La grabación finalizará {in_time}",
+            "stop": "Para y escucha"
+        }
+    },
+    "commands": {
+        "join": {
+            "name": "entrar",
+            "description": "Empezar a grabar en un canal de voz.",
+            "options": {
+                "channel": {
+                    "name": "canal",
+                    "description": "Canal de voz en el que se grabará."
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,232 @@
+{
+    "name": "Türkçe",
+    "common": {
+        "close": "Kapat",
+        "cancel": "İptal et",
+        "delete": "Sil",
+        "download": "İndir",
+        "loading": "Yükleniyor…",
+        "downloading": "İndiriliyor…",
+        "remove": "Kaldır",
+        "avatar": "Avatar",
+        "okay": "Tamam",
+        "nevermind": "Vazgeç",
+        "show_all": "Hepsini göster",
+        "show_less": "Daha az göster",
+        "language": "Dil",
+        "app": "UYG",
+        "new": "Yeni",
+        "dismiss": "Kapat",
+        "beta": "Beta",
+        "format": "Format",
+        "processing": "İşleniyor…"
+    },
+    "recording": {
+        "delete": "Kaydı Sil",
+        "recording_id": "Kayıt ID'si",
+        "delete_modal": {
+            "header": "Bu kaydı silmek istediğine emin misin?",
+            "subtext": "Bu işlem GERİ ALINAMAZ ve kimse işlemi geri almanda sana yardımcı olamaz.",
+            "delete_key": "Silme Anahtarı",
+            "delete_key_invalid": "Sunduğun silme anahtarı geçersiz.",
+            "delete_key_hint": "Silme anahtarın DMlerinde veya {command} komutunda bulunabilir.",
+            "confirm": "Evet, kaydı sil"
+        },
+        "by_user": "{user} tarafından {channel}",
+        "reveal_duration": "Süreyi Göster",
+        "expires_soon": "Süresi Yakında Doluyor",
+        "expires_in": "{expiry} süresi doluyor",
+        "users_recorded": "{count, plural,\n  other {{count, number} Kullanıcı Kaydedildi}\n}",
+        "recording_date": "{date, date, all} tarihinde kaydedildi",
+        "via_bot": "{bot} ile"
+    },
+    "download": {
+        "sections": {
+            "downloads": "İndirmeler",
+            "avatars": "Avatarlar",
+            "mt": "Çoklu Parça",
+            "st": "Tek Parça",
+            "stsm": "Tek Parça Akıllı Mix",
+            "local_processing": "Yerel işleme",
+            "audio": "Ses",
+            "transcription": "Deşifre",
+            "minizel": "Tarayıcı içinde İşleme"
+        },
+        "format_buttons": {
+            "audacity": "Audacity Projesi",
+            "win_executable": "Windows Uygulaması",
+            "unix_script": "Unix Komut Dosyası",
+            "other": "Diğer",
+            "adobe_audition": "Adobe Audition Dosyası",
+            "mac_script": "Mac Komut Dosyası",
+            "srt": "SubRip Metin",
+            "plain_text": "Düz Metin"
+        },
+        "ennuizel_modal": {
+            "header": "Kırmızı tuşlara dikkat et!",
+            "description": "Kırmızı bir çerçevesi olan butonlar tarayıcın içinde Ennuizel kullanarak ses işleme gerektirmektedir. Tarayıcınıza bağlı olarak, kaydınızı işlemek desteklenmiyor veya iyi bir miktarda RAM kullanıyor olabilir. Eğer herhangi bir sorununuz varsa lütfen farklı bir format seçiniz.",
+            "confirm": "Anladım",
+            "selected_format": "Seçili Format"
+        },
+        "modal": {
+            "header": "İndirmeye Hazır mısın?",
+            "subtext": "İndirmen {file} dosyası halinde indirilecektir.",
+            "description": {
+                "project": "Bu dosya {software} uygulaması ile birlikte kullanılmak içindir. Bu dosyayı açmak için, ZIP dosyasındaki her şeyi çıkarıp {file} dosyasına tıkla.",
+                "mix": "Bütün ses parçaları tek bir {file} dosyasında birleştirilir.",
+                "zip": "Kullanıcıların sesleri {file} dosyalarına ayrıştırılır.",
+                "executable": "Craig, sesinizin içine yerleştirileceği taşınabilir bir yürütülebilir dosya oluşturacaktır. Yürütülebilir dosyayı çalıştırmak ses verilerini istediğiniz gibi işlemenize olanak tanıyacaktır. Bu yürütülebilir dosya imzalı olmadığından, anti-virüs programlarına yanlış pozitifler verebileceğini unutmayın.",
+                "script": "Craig, sesinizi istediğiniz gibi işlemenizi sağlayan bir ses işlemci komut dosyası oluşturacaktır. Komut dosyasını çalıştırmadan önce ZIP dosyasının içeriğini ayıklayın.",
+                "linux_script": "Craig, sesinizi istediğiniz gibi işlemenizi sağlayan bir ses işlemci komut dosyası oluşturacaktır. Komut dosyasını çalıştırmadan önce ZIP dosyasının içeriğini ayıklayın. Cihazınızda FFMpeg'in yüklü olması gerekecektir.",
+                "raw": "Bu, genellikle her çok parçalı indirmeye dahil edilen raw.dat dosyasını indirir. Bu Craig tarafından alınan ham Opus verisidir. Çoğu ses programı bunu düzgün bir şekilde desteklemeyebilir.",
+                "transcription_txt": "Bu, kayıttaki herkes için bir düz metin deşifre dosyası oluşturur. Her satırda konuşmacının adı ve konuştuğu satır sırayla yazılır.",
+                "transcription_srt": "Bu, kayıttaki herkes için bir SubRip Metin deşifre dosyası oluşturur. SubRip Text (veya SRT) yaygın olarak desteklenen bir formattır.",
+                "infotxt": "Bu, genellikle her çok parçalı indirmeye dahil edilen info.txt dosyasını indirir. Bu, kayıt hakkında genel bilgi verir.",
+                "transcription_vtt": "Bu, kayıttaki herkes için bir WebVTT deşifre dosyası oluşturur. Bu, her konuşmacı için kelime başına zamanlamaları da içerir. WebVTT, modern yazılımlar için yaygın olarak desteklenen bir formattır."
+            },
+            "normalize_audio": "Sesi normalleştir",
+            "runpod_warn": "Deşifre işlemlerini {whisper} kullanarak işlemek için {runpod} kullanıyoruz. Onların şartlarına tabi olabilirsiniz."
+        },
+        "show_all_formats": "Tüm formatları göster",
+        "active_download_description": "Bir indirme işlemi şuan gerçekleşiyor, ve başka bir şey indirmeden önce bitirilmeli.",
+        "wdiu": {
+            "name": "Hangisini kullanmalıyım?",
+            "content": "Çoklu Parça altındaki düğmeler, her bir parçada ya da ses dosyasında kişilerin seslerinin birbirleriyle senkronize edilmiş haliyle yer aldığı bir ZIP dosyası olarak kaydınızı dışa aktarır.\n\nTekli Parça altındaki düğmeler bütün parçaları tek bir dosya olmak üzere birleştirir.\n\nKayıt dosyasını kolay bir şekilde düzenlemek istersen, {audacity} (veya herhangi bir fork'unu) indirip Audacity Proje dosyasını kullanabilirsin.\n\nEğer Apple kullanıcısı isen, {aac} formatını kullanmak isteyebilirsin.\n\nHer diğer durumda, {flac} yaygın kullanılan ve işine en çok yarayacak formattır."
+        },
+        "avatar_overlays": {
+            "transparency_mkv": "MPEG-4 transparanlık desteklerimiyor, bu nedenle hem sabit bit PNG resim ve transparanlığı temsil eden bir MKV kanalı gönderilecektir. Çoğu video düzenleyicileri bir dosyayı renk ve diğer bir dosyası transparanlık için kullanmaya ayarlanabilir.",
+            "transparency_webm": "WebM transparanlık destekliyor, fakat çoğu video düzenleyici WebM desteklemiyor.",
+            "button_description": "Videolarda kullanılabilecek bir avatar arayüzü oluştur.",
+            "button_name": "Avatar Arayüzleri Oluştur",
+            "help_button": "Bu nedir?",
+            "help": "Avatar Arayüzleri daha büyük kapsamlı video projelerinde kullanılabilecek küçük videolardır. Her arayüz, kullanıcı konuştuğunda avatarlarının etrafında bir yüzük oluşturur. Her arayüz 160x160 pixeldir ve ses içermez. Craig web uygulaması kullanıcılarına varsayılan Discord avatarı verilecektir.",
+            "name": "Avatar Arayüzleri",
+            "options": {
+                "fg": "Yüzük Rengi",
+                "transparent": "Transparan Arkaplan",
+                "format": "Format",
+                "bg": "Arkaplan Rengi"
+            }
+        },
+        "avatar_zip": {
+            "fail": "Avatarlar indirilemedi.",
+            "button_name": "Avatarları İndir",
+            "button_description": "Bu konuşmada olan herkesin avatarlarını bir ZIP dosyasına indir.",
+            "success": "Avatarlar indirildi."
+        },
+        "exclude_user": {
+            "name": "Kullanıcı Hariç Et",
+            "all_excluded_warning": "En az bir kullanıcı dahil edilmeli.",
+            "count": "{count, plural,\n  one {{count, number} kullanıcı dahil edilmiyor}\n  other {{count, number} kullanıcı dahil edilmiyor}\n}",
+            "exclude_from_normalization": "Kullanıcıları normalizasyon'dan hariç et",
+            "all_excluded_normalization_warning": "Eğer herkesi normalizasyondan hariç tutmak istiyorsan, direk normalizasyonu kapat!"
+        },
+        "no_users": "Kayıtta kullanıcı bulunmuyor.",
+        "no_users_description": "Bu kayıtta henüz hiçbir kullanıcı yok. Kullanıcılar konuştuklarında kayda eklenirler. Birinin kayıtta olduğunu onaylamak için kayıt panelini kontrol edin. Sorun varsa, ses bölgesini değiştirin veya kaydı yeniden başlatın."
+    },
+    "avatar_overlays": {
+        "options": {
+            "bg": "Arkaplan Rengi",
+            "fg": "Çerçeve Rengi",
+            "transparent": "Transparan Arkaplan",
+            "format": "Dosya Formatı"
+        }
+    },
+    "footer": {
+        "build": "Sürüm",
+        "support_server": "destek sunucusu",
+        "beta": "Bu sayfa indirme sayfasının bir deneme sürümüdür! Hata raporlamak için {support_server}'na katılın.",
+        "tos": "Hizmet Şartları",
+        "privacy": "Güvenlik Politikası"
+    },
+    "color_picker": {
+        "hex": "HEX rengi",
+        "without_color": "renksiz",
+        "h": "Renk Kanalı",
+        "s": "Doygunluk kanalı",
+        "v": "Parlaklık kanalı",
+        "r": "Kırmızı kanal",
+        "g": "Yeşil kanal",
+        "b": "Mavi kanal",
+        "a": "Transparan kanal",
+        "change_to": "{mode}'ye çevir"
+    },
+    "notification": {
+        "bell": {
+            "unavailable": "Tarayıcının bildirimleri kapalı!",
+            "enable": "Bu bittiğinde bana haber ver",
+            "disable": "Bildirimleri kapat"
+        },
+        "job": {
+            "complete": "İndirme Hazır",
+            "error": "İndirme Hata Verdi",
+            "cancelled": "İndirme İptal Edildi"
+        },
+        "body": "{guild}'in kaydı"
+    },
+    "job": {
+        "loading_track": "Bir parça yükleniyor…",
+        "previous_download": "Önceki İndirme",
+        "duration": "{duration} sürdü",
+        "tracks_status": "{finishedCount, plural,\n  other {{finishedCount, number} parça}\n} tamamlandı, {waitingCount, plural,\n  other {{waitingCount, number} parça}\n} bekleniyor",
+        "queued_description": "Kaydın işleme için sıraya alındı…",
+        "queue_position": "({position}'inci sırada)",
+        "download_complete": "İndirmeniz işlenmesi tamamlandı ve kısa süre içinde indirme penceresi açılmalıdır! Eğer pencere açılmadıysa, aşağıdaki \"İndir\" düğmesine tıkla.",
+        "cancelled_job": "İndirme iptal edildi.",
+        "removed_job": "İndirme silindi.",
+        "status": {
+            "queued": "Sıraya alındı",
+            "cancelled": "İndirme İptal Edildi",
+            "error": "İndirme Hata Verdi",
+            "complete": "Tamamlandı",
+            "idle": "Bekleniyor…"
+        },
+        "state_type": {
+            "starting": "Başlatılıyor…",
+            "encoding": "Kodlanıyor…",
+            "writing": "Yazılıyor…",
+            "uploading": "Yükleniyor…",
+            "finalizing": "Sonuçlandırılıyor…",
+            "processing": "İşleniyor…",
+            "transcribing": "Deşifreleniyor…"
+        },
+        "track_state": {
+            "waiting": "Bekleniyor…",
+            "processing": "İşleniyor…",
+            "done": "Tamamlandı"
+        },
+        "status_time": {
+            "queued": "{time} önce sıraya alındı",
+            "processed": "{time} önce işlendi",
+            "started": "{time} önce başlandı"
+        },
+        "too_many_connections": "Şu anda çok fazla kullanıcı bu kaydı görüntülüyor. Canlı güncellemeler devre dışı bırakılmıştır ve güncellemelerin gösterilmesi daha uzun sürebilir.",
+        "polling_warning": "Çok fazla kullanıcı tarafından görüntülendiği için bu süreçteki değişiklikler hemen yapılamayabilir.",
+        "transcription_queued": "Deşifre İsteği Sıraya Eklendi"
+    },
+    "errors": {
+        "no_key": "Bir anahtar gerekli.",
+        "no_rec": "Kayıt bulunamadı, yada süresi dolmuş.",
+        "invalid_format": "Geçersiz bir format sağlandı.",
+        "invalid_body": "Sunucuya geçersiz bir istek gönderdik, muhtemelen bunu görmemelisiniz. Bu sorun devam ederse sayfayı yeniden yükleyin.",
+        "unknown": "Bilinmeyen bir hata oluştu, daha sonra tekrar dene.",
+        "server_error": "Bir sunucu hatası oluştu, daha sonra tekrar dene.",
+        "invalid_rec": "Verilen kayıt ID'si geçersiz.",
+        "invalid_key": "Verilen anahtar geçersiz.",
+        "rec_no_data": "Bu kayıtta veri bulunamadı ve manuel olarak silinmiş olabilir.",
+        "kitchen_down": "İşleme servisi kullanılamaz halde veya bakım için kapalı. Daha sonra tekrar dene.",
+        "job_exists": "Bu kayıt için zaten bir işleme görevi var.",
+        "no_job": "Bu kayıt için şuanda çalışan bir işleme görevi yok.",
+        "feature_unavailable": "Bu kayıt için kullanılamayan bir özellik istediniz.",
+        "generic": {
+            "duration": "Kaydın süresini öğrenmeye çalışırken bir hata oluştu, daha sonra tekrar dene."
+        },
+        "invalid_delete_key": "Sağlanan silme anahtarı geçersiz.",
+        "invalid_track": "Geçersiz bir parça referans alındı.",
+        "no_tracks_given": "En az bir parça işlenebilmelidir."
+    },
+    "survey": {
+        "text": "Lütfen bu kısa anketi doldurun ve Craig hakkında geri bildirimde bulunun.",
+        "cta": "Anekete Katıl"
+    }
+}

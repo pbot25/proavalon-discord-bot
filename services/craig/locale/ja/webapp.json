@@ -1,0 +1,92 @@
+{
+    "options": {
+        "continuous": {
+            "desc": "VADを無効にして、マイクが拾うすべての音を録音します。",
+            "title": "連続モード",
+            "disabled": "お使いのサーバーでは継続モードは利用できません。この機能を利用するにはPatronになる必要があります。"
+        },
+        "flac": {
+            "desc": "FLACで直接録音すれば、ほぼまるで個別に録音したかのようなクオリティになります。",
+            "disabled": "お使いのサーバーではFLACモードは利用できません。この機能を利用するにはPatronになる必要があります。",
+            "title": "FLACで録音"
+        },
+        "nr": {
+            "title": "ノイズサプレッション",
+            "desc": "マイク入力からバックグラウンドノイズを圧縮します。設定は録音中に変更できます。"
+        }
+    },
+    "_local_name": "日本語",
+    "craigWebapp": "Craig Webアプリ",
+    "back": "戻る",
+    "onboarding": {
+        "errors": {
+            "audioPerm": "音声権限のリクエスト中にエラーが発生しました。",
+            "badNick": "ニックネームが誤っています。",
+            "badServer": "サーバーが間違っています 。"
+        },
+        "join": "入室",
+        "joining": "入室中",
+        "nickLabel": "なんとお呼びしましょうか？",
+        "requesting": "権限をリクエスト中.…",
+        "record": "録音",
+        "recordDesc": "ユーザーとして録音セッションに入室する",
+        "monitor": "モニター",
+        "monitorDesc": "録音されている人を確認する",
+        "noAudio": {
+            "title": "マイクが無効です！",
+            "desc": "URLバーの横にある鍵アイコンからマイクを有効にし、ページを再読み込みしてください。"
+        },
+        "nickPlaceholder": "ニックネーム"
+    },
+    "modal": {
+        "disconnectedBody": "サーバへの接続が切れました。",
+        "disconnected": "退室しました。",
+        "reason": "理由",
+        "reload": "再読み込み",
+        "errors": {
+            "CLOSED": "サーバーとの接続が閉じられました。",
+            "SHARD_CLOSED": "予期せず接続が切断されました。",
+            "RECORDING_ENDED": "録音は終了しました。",
+            "INVALID": "不明な原因によりサーバーでデータを処理できませんでした。",
+            "INVALID_USERNAME": "サーバーに送信されたユーザーネームが無効です",
+            "INVALID_CONNECTION_TYPE": "サーバーに送信された接続タイプが無効です",
+            "INVALID_MESSAGE": "不明な原因により、サーバーでデータを処理できませんでした。",
+            "INVALID_FLAGS": "サーバーに送信されたフラッグが無効です",
+            "INVALID_ID": "サーバーに送信されたIDが無効です",
+            "INVALID_TOKEN": "サーバーに送信されたトークンが無効です",
+            "NOT_FOUND": "録音はサーバーと接続されていません",
+            "ALREADY_CONNECTED": "この録音には過剰な人数が接続しています"
+        }
+    },
+    "server": {
+        "local": "ローカル",
+        "custom": "カスタム"
+    },
+    "login": {
+        "connect": "接続",
+        "recId": "レコーディングID",
+        "server": "サーバー",
+        "what": "ウェブアプリについて",
+        "home": "ホームページ",
+        "privacy": "プライバシーポリシー",
+        "tos": "利用規約",
+        "webKey": "Webアプリキー",
+        "errors": {
+            "notFound": "この録音は見つかりませんでした。録音設定でウェブアプリ機能が有効化されているか確認してください。",
+            "invalidKey": "この録音へのWebアプリキーが無効です。",
+            "noID": "レコーディングIDが入力されませんでした。",
+            "noKey": "Webアプリキーが入力されませんでした。"
+        }
+    },
+    "rec": {
+        "noUsersConnected": "だれも接続していません.…",
+        "connectedAs": "以下として接続:",
+        "mute": "ミュート",
+        "unmute": "ミュート解除",
+        "disconnect": "退室",
+        "microphone": "マイク",
+        "viaWeb": "(Webアプリ上)",
+        "continuous": "継続"
+    },
+    "in": ":"
+}

@@ -1,0 +1,92 @@
+{
+    "server": {
+        "local": "Local",
+        "custom": "Personalizado"
+    },
+    "options": {
+        "flac": {
+            "disabled": "Tu servidor no tiene la caracteristica modo FLAC. Forma parte del patreon para usar esta caracteristica.",
+            "title": "Grabar en FLAC",
+            "desc": "Grabar directamente en FLAC hará que tu audio sea casi idéntico a grabar a las personas de forma individual."
+        },
+        "continuous": {
+            "disabled": "Tu servidor no tiene la característica de modo contínuo. Forma parte del patreon para usar esta característica.",
+            "title": "Modo Contínuo",
+            "desc": "Desactiva el VAD y graba todo lo que capte tu micrófono."
+        },
+        "nr": {
+            "title": "Supresión de ruido",
+            "desc": "Suprime el ruido de fondo de tu micrófono. Puedes cambiar esta configuración durante la grabación."
+        }
+    },
+    "_local_name": "Español",
+    "craigWebapp": "Aplicación web de Craig",
+    "back": "Atrás",
+    "in": "En",
+    "login": {
+        "connect": "Conectar",
+        "recId": "ID de grabación",
+        "webKey": "Llave de webapp",
+        "server": "Servidor",
+        "what": "¿Qué es esto?",
+        "home": "Inicio",
+        "privacy": "Política de privacidad",
+        "tos": "Terminos de servicio",
+        "errors": {
+            "invalidKey": "La llave webapp de esta grabacio es incorrecta.",
+            "noID": "No se ha proporcionado una ID de grabación.",
+            "noKey": "No se ha proporcionado una llave webapp.",
+            "notFound": "Esta grabación no ha sido encontrada. Asegúrate de que tu grabacion tiene el webapp activado."
+        }
+    },
+    "onboarding": {
+        "join": "Unirse",
+        "joining": "Uniendose",
+        "nickLabel": "¿Cómo deberia llamarte?",
+        "nickPlaceholder": "Nombre",
+        "requesting": "Solicitando permiso…",
+        "record": "Grabar",
+        "monitor": "Monitor",
+        "monitorDesc": "Comprobar cuando la persona esta siendo grabada",
+        "noAudio": {
+            "title": "¡No puedo usar tu micrófono!",
+            "desc": "Haz clic en el ícono junto a la barra de URL, activa el permiso del micrófono y recarga la página."
+        },
+        "errors": {
+            "audioPerm": "Error al solicitar permiso de audio",
+            "badNick": "Nombre incorrecto.",
+            "badServer": "Servidor incorrecto."
+        },
+        "recordDesc": "Unete a la sesión de grabacion como un usuario"
+    },
+    "rec": {
+        "noUsersConnected": "No hay usuarios conectados…",
+        "connectedAs": "Conectado como",
+        "mute": "Silenciado",
+        "disconnect": "Desconectar",
+        "microphone": "Micrófono",
+        "continuous": "Contiuo",
+        "unmute": "Desilenciado",
+        "viaWeb": "(vía Webapp)"
+    },
+    "modal": {
+        "disconnected": "Desconectado.",
+        "disconnectedBody": "Se perdió la conexión con el servidor.",
+        "reason": "Razón",
+        "reload": "Actualizar",
+        "errors": {
+            "CLOSED": "La conexión con el servidor se cerró.",
+            "RECORDING_ENDED": "La grabación ha terminado.",
+            "INVALID": "¡El servidor no pudo procesar nuestros datos de alguna manera!",
+            "INVALID_MESSAGE": "¡El servidor no pudo procesar nuestros datos de alguna manera!",
+            "INVALID_TOKEN": "¡El token enviado al servidor no es correcto!",
+            "INVALID_USERNAME": "¡El nombre enviado al servidor no es correcto!",
+            "INVALID_CONNECTION_TYPE": "¡La forma de conexión enviada al servidor no es correcta!",
+            "INVALID_FLAGS": "¡Las banderas enviadas al servidor son incorrectas!",
+            "SHARD_CLOSED": "La conexión de la grabación se cerró inesperadamente.",
+            "INVALID_ID": "¡La ID enviada al servidor no es correcta!",
+            "NOT_FOUND": "¡La grabación no esta conectada al servidor!",
+            "ALREADY_CONNECTED": "¡Demasiados usuarios estan conectados a esta grabación!"
+        }
+    }
+}

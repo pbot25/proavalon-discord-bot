@@ -1,0 +1,92 @@
+{
+    "modal": {
+        "errors": {
+            "ALREADY_CONNECTED": "Es sind zu viele Personen mit dieser Aufnahme verbunden!",
+            "NOT_FOUND": "Die Aufzeichnung ist nicht mehr mit dem Server verbunden!",
+            "INVALID_CONNECTION_TYPE": "Der an den Server gesendete Verbindungstyp war ungültig!",
+            "INVALID_USERNAME": "Der an den Server gesendete Benutzername war ungültig!",
+            "INVALID_TOKEN": "Das an den Server gesendete Token war ungültig!",
+            "INVALID_FLAGS": "Die an den Server gesendeten Flags waren ungültig!",
+            "INVALID_ID": "Die ID welche dem Server gesendet wurde ist ungültig!",
+            "INVALID_MESSAGE": "Der Server konnte unseren Daten irgendwie nicht bearbeiten!",
+            "INVALID": "Der Server konnte die Daten irgendwie nicht verarbeiten!",
+            "RECORDING_ENDED": "Die Aufnahme wurde beendet.",
+            "SHARD_CLOSED": "Die Verbindung der Aufzeichnung wurde unerwartet geschlossen.",
+            "CLOSED": "Die Verbindung zum Server wurde geschlossen."
+        },
+        "reload": "Neuladen",
+        "reason": "Grund",
+        "disconnectedBody": "Deine Verbindung zum Server wurde unterbrochen.",
+        "disconnected": "Verbindung getrennt."
+    },
+    "rec": {
+        "disconnect": "Verbindung trennen",
+        "unmute": "Stummschalten aufheben",
+        "mute": "Stummschalten",
+        "continuous": "Kontinuierlich",
+        "connectedAs": "Verbunden als",
+        "noUsersConnected": "Keine Benutzer verbunden…",
+        "viaWeb": "(über die Webapp)",
+        "microphone": "Mikrofon"
+    },
+    "onboarding": {
+        "errors": {
+            "badServer": "Ungültiger Server.",
+            "badNick": "Ungültiger Benutzername.",
+            "audioPerm": "Fehler beim Anfordern der Audioberechtigung"
+        },
+        "noAudio": {
+            "desc": "Klick auf das Icon neben der URL-Leiste, aktiviere die Mikrofonberechtigung und lade die Seite neu.",
+            "title": "Ich kann dein Mikrofon nicht benutzen!"
+        },
+        "monitorDesc": "Überprüfe wenn Leute aufgenommen werden",
+        "monitor": "Monitor",
+        "recordDesc": "Trete der Aufnahme als Nutze bei",
+        "record": "Aufnehmen",
+        "requesting": "Genehmigung anfragen…",
+        "nickPlaceholder": "Benutzername",
+        "nickLabel": "Wie soll ich dich nennen?",
+        "joining": "Beitreten",
+        "join": "Beitreten"
+    },
+    "login": {
+        "errors": {
+            "noKey": "Kein Webapp-Code bereitgestellt.",
+            "noID": "Keine Aufnahmen ID bereitgestellt.",
+            "invalidKey": "Der Webapp-Code zu dieser Aufnahme ist ungültig.",
+            "notFound": "Die Aufnahme konnte nicht gefunden werden. Stelle sicher dass deine Aufnahme die Webapp aktiviert hat."
+        },
+        "tos": "AGB",
+        "privacy": "Datenschutzbestimmungen",
+        "home": "Homepage",
+        "what": "Was ist das?",
+        "server": "Server",
+        "webKey": "Webapp Code",
+        "recId": "Aufnahmen ID",
+        "connect": "Verbinden"
+    },
+    "options": {
+        "nr": {
+            "desc": "Unterdrückt die Hintergrundgeräusche von deinem Mikrofon. Du kannst diese Einstellung während der Aufnahme anpassen.",
+            "title": "Rauschunterdrückung"
+        },
+        "continuous": {
+            "disabled": "Dein Server hat das kontinuierliche Aufnehmen Feature nicht. Werde ein Patron um dieses Feature zu nutzen.",
+            "desc": "Deaktiviere die Sprechpausenaktivierung und nimm alles auf, was dein Mikrofon erkennt.",
+            "title": "Kontinuierlicher Modus"
+        },
+        "flac": {
+            "disabled": "Dein Server beinhaltet das FLAC Modus-Feature nicht. Werde ein Patron um diese Feature zu nutzen.",
+            "desc": "Direkt in FLAC aufnehmen nimmt den Ton fast identisch auf, als wenn diese einzeln aufgenommen werden würden.",
+            "title": "In FLAC aufnehmen"
+        }
+    },
+    "server": {
+        "custom": "Benutzerdefiniert",
+        "local": "Lokal"
+    },
+    "in": "auf",
+    "back": "Zurück",
+    "craigWebapp": "Craig Webapp",
+    "_local_name": "Deutsch"
+}

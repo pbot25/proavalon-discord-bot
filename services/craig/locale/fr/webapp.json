@@ -1,0 +1,92 @@
+{
+    "_local_name": "Français",
+    "onboarding": {
+        "noAudio": {
+            "desc": "Clique sur l'icône a côté de l'URL, active la permission au micro et recharge la page.",
+            "title": "Je ne peux pas utiliser ton micro !"
+        },
+        "errors": {
+            "badServer": "Serveur invalide.",
+            "badNick": "Surnom invalide.",
+            "audioPerm": "Erreur lors de la demande de permission audio"
+        },
+        "monitorDesc": "Vérifie quand les personnes sont enregistrées",
+        "monitor": "Surveiller",
+        "recordDesc": "Rejoindre la session d'enregistrement en tant qu'utilisateur",
+        "record": "Enregistrer",
+        "requesting": "Demande de permission…",
+        "nickPlaceholder": "Surnom",
+        "nickLabel": "Comment devrais-je t'appeler ?",
+        "joining": "Connexion",
+        "join": "Rejoindre"
+    },
+    "modal": {
+        "errors": {
+            "ALREADY_CONNECTED": "Trop de personnes sont connectés à cet enregistrement !",
+            "NOT_FOUND": "L'enregistrement n'est plus connecté au serveur !",
+            "INVALID_CONNECTION_TYPE": "Le type de connexion envoyé au serveur est invalide !",
+            "INVALID_USERNAME": "Le surnom envoyé au serveur est invalide !",
+            "INVALID_TOKEN": "Le token envoyé au serveur est invalide !",
+            "INVALID_FLAGS": "Les libellés envoyés au serveur sont invalides !",
+            "INVALID_ID": "L'ID envoyé au serveur est invalide !",
+            "INVALID_MESSAGE": "Le serveur n'a pas pu traiter nos données !",
+            "INVALID": "Le serveur n'a pas pu traiter nos données !",
+            "RECORDING_ENDED": "L'enregistrement s'est terminé.",
+            "SHARD_CLOSED": "La connexion à l'enregistrement s'est fermée de manière inattendue.",
+            "CLOSED": "La connexion au serveur a été fermée."
+        },
+        "reload": "Recharger",
+        "reason": "Raison",
+        "disconnectedBody": "La connexion au serveur a été perdue.",
+        "disconnected": "Déconnecté."
+    },
+    "rec": {
+        "microphone": "Micro",
+        "disconnect": "Déconnecter",
+        "unmute": "Ne plus rendre muet",
+        "mute": "Muet",
+        "continuous": "Enregistrement en continu",
+        "connectedAs": "Connecté en tant que",
+        "noUsersConnected": "Aucun utilisateur connecté…",
+        "viaWeb": "(via Webapp)"
+    },
+    "login": {
+        "errors": {
+            "noKey": "Aucune clé Webapp fournie.",
+            "noID": "Aucun ID d'enregistrement fourni.",
+            "invalidKey": "La clé Webapp est invalide.",
+            "notFound": "Cet enregistrement n'a pas été trouvé. Assurez-vous que la fonctionnalité Webapp est activée dans votre enregistrement."
+        },
+        "tos": "Conditions d'utilisation",
+        "privacy": "Politique de confidentialité",
+        "home": "Page d'accueil",
+        "what": "Qu'est-ce que c'est ?",
+        "server": "Serveur",
+        "webKey": "Clé d'application web",
+        "recId": "ID d'enregistrement",
+        "connect": "Connecter"
+    },
+    "options": {
+        "nr": {
+            "desc": "Supprime le bruit de fond de ton microphone. Tu pourras changer cela pendant l'enregistrement.",
+            "title": "Suppression de bruit"
+        },
+        "continuous": {
+            "disabled": "Ton serveur n'a pas la fonctionnalité d'enregistrement en continu. Deviens un patron pour utiliser cette fonctionnalité.",
+            "desc": "Désactive la détection de voix et enregistre tout ce que ton micro capte.",
+            "title": "Enregistrement en continu"
+        },
+        "flac": {
+            "disabled": "Votre serveur ne dispose pas de la fonctionnalité FLAC. Devenez un patron pour utiliser cette fonction.",
+            "desc": "Enregistrer directement en FLAC rendra votre audio presque identique à l'enregistrement individuel des personnes.",
+            "title": "Enregistrer en FLAC"
+        }
+    },
+    "server": {
+        "custom": "Personnalisé",
+        "local": "Local"
+    },
+    "in": "de",
+    "back": "Retour",
+    "craigWebapp": "Application Web Craig"
+}

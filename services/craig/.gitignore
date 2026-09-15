@@ -1,0 +1,51 @@
+# dependencies
+node_modules/
+
+# development
+.next/
+.vscode/*
+!.vscode/launch.json
+!.vscode/extensions.json
+.idea/
+.vercel/
+.turbo/
+.prisma-client/
+.pnpm-store/
+.tmp/
+.docker/
+*.zip
+
+# production
+data/
+/craig-data/
+/downloads/
+/rec/
+/rec_cache/
+/output/
+dist/
+build/
+/rec
+
+# misc
+.DS_Store
+*.pem
+*.swp
+_tmp_*
+
+# Database
+*.db
+*.db-shm
+*.db-wal
+
+# Logs
+*.log
+node-log.txt
+nohup.out
+*.heapsnapshot
+
+# ENV files
+*.env
+.env
+.env.*
+!.env.example
+!*.env.example

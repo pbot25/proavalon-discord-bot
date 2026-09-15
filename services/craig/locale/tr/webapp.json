@@ -1,0 +1,92 @@
+{
+    "onboarding": {
+        "noAudio": {
+            "title": "Mikrofonunu kullanamıyorum!",
+            "desc": "URL çubuğunun yanındaki minik ikona tıkla ve mikrofonuna erişim izni ver. Ardından sayfayı yenile."
+        },
+        "requesting": "İzin isteniyor…",
+        "errors": {
+            "badServer": "Geçersiz sunucu.",
+            "badNick": "Geçersiz kullanıcı adı.",
+            "audioPerm": "Ses izni istenirken hatayla karşılaşıldı"
+        },
+        "record": "Kayıt",
+        "nickPlaceholder": "Kullanıcı Adı",
+        "nickLabel": "Sana ne olarak seslenmeliyim?",
+        "joining": "Katılınıyor",
+        "join": "Katıl",
+        "recordDesc": "Kayıta konuşmacı olarak katıl",
+        "monitor": "İzleyici",
+        "monitorDesc": "Kayıt altındaki insanları kontrol et"
+    },
+    "modal": {
+        "errors": {
+            "RECORDING_ENDED": "Kayıt sonlandı.",
+            "INVALID": "Sunucu verilerimizi bir şekilde işleyemedi!",
+            "INVALID_CONNECTION_TYPE": "Sunucuya gönderilen bağlantı türü geçersiz!",
+            "INVALID_FLAGS": "Sunucuya gönderilen seçenekler geçersiz!",
+            "CLOSED": "Sunucuyla olan bağlantın kesildi.",
+            "SHARD_CLOSED": "Kayıtın bağlantısı beklenmedik bir şekilde kesildi.",
+            "INVALID_MESSAGE": "Sunucu verilerimizi bir şekilde işleyemedi!",
+            "INVALID_USERNAME": "Sunucuya gönderilen kullanıcı adı geçersiz!",
+            "ALREADY_CONNECTED": "Kayıtta çok fazla kişi var!",
+            "INVALID_TOKEN": "Sunucuya gönderilen token geçersiz!",
+            "INVALID_ID": "Sunucuya gönderilen ID geçersiz!",
+            "NOT_FOUND": "Kayıt artık sunucuya bağlı değil!"
+        },
+        "reload": "Yeniden Yükle",
+        "reason": "Sebep",
+        "disconnected": "Bağlantı kesildi.",
+        "disconnectedBody": "Sunucuyla olan bağlantın koptu."
+    },
+    "rec": {
+        "noUsersConnected": "Bağlı kullanıcı yok…",
+        "microphone": "Mikrofon",
+        "disconnect": "Bağlantıyı Kes",
+        "unmute": "Susturmayı Kaldır",
+        "mute": "Sustur",
+        "connectedAs": "Olarak bağlı",
+        "viaWeb": "(Webapp ile)",
+        "continuous": "Sürekli Kayıt"
+    },
+    "in": "",
+    "login": {
+        "errors": {
+            "noKey": "Webapp kodu sağlanamadı.",
+            "noID": "Kayıt ID'si sağlanamadı.",
+            "invalidKey": "Bu kaydın webapp kodu geçersiz.",
+            "notFound": "Kayıt bulunamadı. Kaydına Webapp'de gözükme izni verdiğinden emin ol."
+        },
+        "tos": "Hizmet Şartları",
+        "privacy": "Güvenlik Politikası",
+        "server": "Sunucu",
+        "home": "Ana Sayfa",
+        "what": "Bu nedir?",
+        "webKey": "Webapp Kodu",
+        "recId": "Kayıt ID'si",
+        "connect": "Bağlan"
+    },
+    "options": {
+        "nr": {
+            "title": "Gürültü Azaltma",
+            "desc": "Arkaplandan gelen sesleri bastırır. Bunu kayıttayken de değiştirebilirsin."
+        },
+        "flac": {
+            "title": "FLAC uzantısında kaydet",
+            "desc": "FLAC uzantısında kayıt almak her insanın sesini ayrı kaydetmek gibi olacaktır.",
+            "disabled": "Sunucun FLAC uzantısı özelliğine sahip değil. Bu özelliği kullanabilmek için Patreon Patronu olmalısın."
+        },
+        "continuous": {
+            "disabled": "Sunucun Sürekli Kayıt özelliğine sahip değil. Bu özelliği kullanabilmek için Patreon Patronu olmalısın.",
+            "desc": "VAD'ı (Ses Etkinliği Algılama) devre dışı bırak ve mikrofonundan gelen her sesi kaydet.",
+            "title": "Sürekli Kayıt Modu"
+        }
+    },
+    "server": {
+        "custom": "Özel",
+        "local": "Yerel"
+    },
+    "back": "Geri",
+    "craigWebapp": "Craig Webapp",
+    "_local_name": "Türkçe"
+}

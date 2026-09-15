@@ -1,0 +1,103 @@
+{
+    "name": "Nederlands",
+    "common": {
+        "close": "Sluiten",
+        "cancel": "Annuleren",
+        "delete": "Verwijderen",
+        "download": "Download",
+        "loading": "Laden…",
+        "downloading": "Downloaden…",
+        "remove": "Verwijder",
+        "nevermind": "Laat maar",
+        "show_all": "Laat alles zien",
+        "show_less": "Laat minder zien",
+        "language": "Taal",
+        "avatar": "Profielfoto",
+        "okay": "Oké"
+    },
+    "recording": {
+        "delete": "Verwijder Opname",
+        "recording_id": "Opname ID",
+        "delete_modal": {
+            "header": "Weet je het zeker dat je deze opname wilt verwijderen?",
+            "subtext": "Deze actie is NIET TERUGDRAAIBAAR en niemand kan je helpen om het terug te krijgen.",
+            "delete_key": "Verwijder Sleutel",
+            "delete_key_invalid": "De verwijder sleutel die je hebt opgegeven is ongeldig.",
+            "delete_key_hint": "Je vergeet sleutel kan gevonden worden in je DMs of als je het {command} commando uitvoerd.",
+            "confirm": "Ja, verwijder deze opname"
+        },
+        "reveal_duration": "Laat duur zien",
+        "expires_soon": "Verloopt binnenkort",
+        "expires_in": "Verloopt {expiry}",
+        "users_recorded": "{count, plural,\n  one {{count, number} Gebruiker Opgenomen}\n  other {{count, number} Gebruikers Opgenomen}\n}",
+        "recording_date": "Opgenomen op {date, date, all}",
+        "by_user": "{channel} door {user}",
+        "via_bot": "via {bot}"
+    },
+    "download": {
+        "sections": {
+            "downloads": "Downloads",
+            "avatars": "Avatars",
+            "mt": "Multi-lijns",
+            "st": "Enkel-lijns gemixed",
+            "stsm": "Enkel-lijns Slimme Mix",
+            "local_processing": "Lokale Verwerking",
+            "audio": "Geluid"
+        },
+        "format_buttons": {
+            "audacity": "Audacity Project",
+            "win_executable": "Windows Applicatie",
+            "unix_script": "Unix Script",
+            "other": "Andere",
+            "mac_script": "Mac Script",
+            "adobe_audition": "Adobe Audition Sessie"
+        },
+        "ennuizel_modal": {
+            "header": "Let op de rode knop!",
+            "description": "Knoppen die een rode rand hebben, moeten de audio verwerken in je browser door gebruik te maken van Ennuizel. Op basis van je browser, kan dit niet werken of gebruikt dit een groot deel van je RAM om door je audio heen te gaan. Als je problemen hebt, kies een ander formaat.",
+            "confirm": "Ik snap het"
+        },
+        "wdiu": {
+            "name": "Welke gebruik ik?",
+            "content": "Knoppen onder Multi-track exporteren je opname in een ZIP-bestand met elk spoor, of geluidsbestand, met elke stem erin, al gesynchroniseerd met elkaar.\n\nKnoppen onder Enkeltrack voegen al die sporen samen in één bestand.\n\nAls je een gemakkelijke manier wilt om je audio te bewerken, dan kun je {audacity} (of alle forks daarvan) installeren en gebruiken en het Audacity Project formaat downloaden.\n\nAls je een Apple gebruiker bent, kun je het {aac} formaat gebruiken.\n\nIn alle andere gevallen is {flac} een algemeen ondersteund formaat dat het beste voor je zal werken."
+        },
+        "show_all_formats": "Laat alle formaten zien",
+        "active_download_description": "Een download word op dit moment behandeld, en moet klaar zijn voordat er nogmaals kan worden gedownload.",
+        "modal": {
+            "header": "Bereid om te downloaden?",
+            "subtext": "Je download zal worden geleverd in de vorm van een {file} bestand.",
+            "description": {
+                "project": "Dit bestand is bedoelt om te gebruiken bij {software}. Om dit bestand te openen, pak het ZIP bestand uit en open het project door het {file} bestand te openen."
+            }
+        },
+        "avatar_overlays": {
+            "help": "Profielfoto Overlays zijn kleine video's die gebruikt kunnen worden in grotere video projecten. Elke overlay heeft een aparte ring die gloeit zodra de persoon van de overlay praat. Elke overlay is 160x160 en heeft geen audio erbij zitten. Webapplicatie gebruikers krijgen een standaard Discord profielfoto."
+        }
+    },
+    "avatar_overlays": {
+        "name": "Avatar-overlays",
+        "options": {
+            "bg": "Achtergrond Kleur",
+            "fg": "Schijn Kleur",
+            "transparent": "Transparante Achtergrond",
+            "format": "Formaat"
+        }
+    },
+    "footer": {
+        "build": "Versie",
+        "tos": "Servicevoorwaarden",
+        "privacy": "Privacybeleid"
+    },
+    "color_picker": {
+        "h": "Kleur kanaal",
+        "s": "Saturatie kanaal",
+        "v": "Licht kanaal",
+        "r": "Rood kanaal",
+        "g": "Groen kanaal",
+        "b": "Blauw kanaal",
+        "a": "Alpha kanaal",
+        "hex": "HEX kleur",
+        "without_color": "zonder kleur",
+        "change_to": "Verander naar {mode}"
+    }
+}
