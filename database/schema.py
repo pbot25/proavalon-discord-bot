@@ -202,6 +202,13 @@ CREATE TABLE IF NOT EXISTS season_match_configs (
     updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS recording_configs (
+    guild_id TEXT PRIMARY KEY,
+    enabled INTEGER NOT NULL DEFAULT 0 CHECK (enabled IN (0, 1)),
+    output_channel_id TEXT,
+    updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS season_matches (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     community_season_id INTEGER NOT NULL,

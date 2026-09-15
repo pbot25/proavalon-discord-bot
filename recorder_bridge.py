@@ -8,6 +8,8 @@ from aiohttp import web
 
 from database.discord_roles import get_active_season_linked_users
 from database.seasons import get_active_season
+from database.matches import get_match_config
+from database.recording_settings import get_recording_config
 
 
 class RecorderBridge:
@@ -50,6 +52,8 @@ class RecorderBridge:
         if tracker is None:
             raise web.HTTPServiceUnavailable(text="Live tracker is not ready.")
         links = {}
+        recording_config = None
+        voice_channels = []
         guild_id_text = request.query.get("guild_id", "").strip()
         if guild_id_text:
             try:
@@ -57,6 +61,32 @@ class RecorderBridge:
             except ValueError:
                 raise web.HTTPBadRequest(text="guild_id must be a number.")
             season = await get_active_season(guild_id)
+            configured = await get_recording_config(guild_id)
+            match_config = await get_match_config(guild_id)
+            output_channel_id = None
+            if configured and configured["output_channel_id"]:
+                output_channel_id = int(configured["output_channel_id"])
+            elif match_config and match_config["enabled"]:
+                output_channel_id = int(match_config["channel_id"])
+            recording_config = {
+                "enabled": bool(configured and configured["enabled"]),
+                "output_channel_id": output_channel_id,
+                "minimum_linked_players_in_voice": 6,
+                "postgame_seconds": 30,
+            }
+            guild = self.bot.get_guild(guild_id)
+            if guild is not None:
+                voice_channels = [
+                    {
+                        "channel_id": channel.id,
+                        "name": channel.name,
+                        "member_ids": [
+                            member.id for member in channel.members
+                            if not member.bot
+                        ],
+                    }
+                    for channel in guild.voice_channels
+                ]
             if season is not None:
                 rows = await get_active_season_linked_users(
                     guild_id,
@@ -73,4 +103,6 @@ class RecorderBridge:
             "observed_at": datetime.now(timezone.utc).isoformat(),
             "lobbies": tracker.get_recorder_lobby_snapshot(),
             "account_links": links,
+            "recording_config": recording_config,
+            "voice_channels": voice_channels,
         })

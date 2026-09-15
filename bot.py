@@ -78,6 +78,7 @@ class ProAvalonBot(commands.Bot):
         await self.load_extension("commands.group")
         await self.load_extension("commands.insights")
         await self.load_extension("commands.roles")
+        await self.load_extension("commands.recording")
 
         await self.recorder_bridge.start()
 
