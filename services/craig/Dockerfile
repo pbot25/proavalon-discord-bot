@@ -17,8 +17,7 @@ COPY . .
 # Windows checkouts do not preserve executable mode bits on shell scripts.
 RUN find . -type f -name '*.sh' -exec chmod +x {} +
 
-RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
-  pnpm install --frozen-lockfile
+RUN pnpm install --frozen-lockfile
 
 ARG CRAIG_VERSION=unknown
 ENV CRAIG_VERSION=$CRAIG_VERSION
