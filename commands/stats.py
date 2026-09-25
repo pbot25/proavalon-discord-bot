@@ -58,6 +58,14 @@ SOCIAL_LIST_CHOICES = [
         name="Rivals",
         value="rivals",
     ),
+    app_commands.Choice(
+        name="Most Dominated",
+        value="most-dominated",
+    ),
+    app_commands.Choice(
+        name="Nemeses",
+        value="nemeses",
+    ),
 ]
 
 
@@ -988,7 +996,9 @@ def build_social_embed(
             else (
                 f"`{nemesis['username']}` — "
                 f"**{nemesis['opponent_wins']}–{nemesis['opponent_losses']}** "
-                f"head-to-head • {nemesis['opposite_games']} opponent games"
+                f"head-to-head • "
+                f"**{100.0 - nemesis['opponent_win_rate']:.1f}% loss rate** • "
+                f"{nemesis['opposite_games']} opponent games"
             )
         ),
         inline=False,
@@ -1003,7 +1013,9 @@ def build_social_embed(
             else (
                 f"`{dominated['username']}` — "
                 f"**{dominated['opponent_wins']}–{dominated['opponent_losses']}** "
-                f"head-to-head • {dominated['opposite_games']} opponent games"
+                f"head-to-head • "
+                f"**{dominated['opponent_win_rate']:.1f}% WR** • "
+                f"{dominated['opposite_games']} opponent games"
             )
         ),
         inline=False,
@@ -1032,22 +1044,6 @@ def build_social_embed(
         ),
         inline=False,
     )
-
-    role_pairs = stats.get("role_pairs") or []
-    if role_pairs:
-        top_pairs = role_pairs[:5]
-        lines = []
-        for pair in top_pairs:
-            lines.append(
-                f"`{pair['partner']}` — "
-                f"**{pair['player_role']} + {pair['partner_role']}** • "
-                f"{pair['games']} games • {pair['win_rate']:.1f}% WR"
-            )
-        embed.add_field(
-            name="Most Common Role Pairings",
-            value="\n".join(lines),
-            inline=False,
-        )
 
     embed.set_footer(
         text=(
@@ -1126,31 +1122,6 @@ def build_social_compare_embed(
         ),
         inline=False,
     )
-
-    role_pairs = stats.get("role_pairs") or []
-    if role_pairs:
-        lines = []
-        for pair in role_pairs[:8]:
-            if pair["relation"] == "same":
-                outcome = (
-                    f"{pair['shared_wins']}W–{pair['shared_losses']}L"
-                )
-            else:
-                outcome = (
-                    f"{p1} {pair['player_one_wins']}–"
-                    f"{pair['player_two_wins']} {p2}"
-                )
-
-            lines.append(
-                f"**{pair['player_one_role']} / {pair['player_two_role']}** — "
-                f"{pair['games']} games • {outcome}"
-            )
-
-        embed.add_field(
-            name="Role-Pair History",
-            value="\n".join(lines),
-            inline=False,
-        )
 
     embed.set_footer(
         text="Uses all archived matches currently stored for this season"
@@ -1691,7 +1662,7 @@ class StatsCommands(
 
     @app_commands.command(
         name="list",
-        description="Lists most-played-with players, teammates, or rivals.",
+        description="Lists teammates, rivals, nemeses, and dominated opponents.",
     )
     @app_commands.describe(
         category="Which relationship list to show.",
@@ -1826,7 +1797,7 @@ class StatsCommands(
                 for index, row in enumerate(relationships[:10], start=1)
             ]
 
-        else:
+        elif category.value == "rivals":
             relationships = [
                 row
                 for row in relationships
@@ -1847,6 +1818,58 @@ class StatsCommands(
                     f"• H2H {int(row['opponent_wins'])}-"
                     f"{int(row['opponent_losses'])} "
                     f"• {float(row['opponent_win_rate']):.1f}% WR"
+                )
+                for index, row in enumerate(relationships[:10], start=1)
+            ]
+
+        elif category.value == "most-dominated":
+            relationships = [
+                row
+                for row in relationships
+                if int(row["opposite_games"]) >= minimum
+            ]
+            relationships.sort(
+                key=lambda row: (
+                    -float(row["opponent_win_rate"]),
+                    -int(row["opponent_wins"]),
+                    -int(row["opposite_games"]),
+                    str(row["username"]).casefold(),
+                )
+            )
+            title = f"{resolved} — Most Dominated"
+            lines = [
+                (
+                    f"**{index}.** `{row['username']}` — "
+                    f"**{float(row['opponent_win_rate']):.1f}% WR** "
+                    f"• H2H {int(row['opponent_wins'])}-"
+                    f"{int(row['opponent_losses'])} "
+                    f"• {int(row['opposite_games'])} opponent games"
+                )
+                for index, row in enumerate(relationships[:10], start=1)
+            ]
+
+        else:
+            relationships = [
+                row
+                for row in relationships
+                if int(row["opposite_games"]) >= minimum
+            ]
+            relationships.sort(
+                key=lambda row: (
+                    float(row["opponent_win_rate"]),
+                    -int(row["opponent_losses"]),
+                    -int(row["opposite_games"]),
+                    str(row["username"]).casefold(),
+                )
+            )
+            title = f"{resolved} — Nemeses"
+            lines = [
+                (
+                    f"**{index}.** `{row['username']}` — "
+                    f"**{100.0 - float(row['opponent_win_rate']):.1f}% loss rate** "
+                    f"• H2H {int(row['opponent_wins'])}-"
+                    f"{int(row['opponent_losses'])} "
+                    f"• {int(row['opposite_games'])} opponent games"
                 )
                 for index, row in enumerate(relationships[:10], start=1)
             ]

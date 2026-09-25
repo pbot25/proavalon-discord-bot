@@ -199,7 +199,6 @@ def build_player_social_stats(
     target = username.casefold()
     relevant: list[ArchivedMatch] = []
     relationships: dict[str, dict[str, Any]] = {}
-    role_pairs: dict[tuple[str, str, str], dict[str, Any]] = {}
 
     canonical_username = username
 
@@ -277,37 +276,6 @@ def build_player_social_stats(
                     rel["opponent_wins"] += 1
                 elif player_won is False:
                     rel["opponent_losses"] += 1
-
-            if player.role and other.role:
-                relation = (
-                    "same"
-                    if same_alignment
-                    else "opposite"
-                    if opposite_alignment
-                    else "unknown"
-                )
-                pair_key = (
-                    other.username.casefold(),
-                    player.role.casefold(),
-                    other.role.casefold(),
-                )
-                pair = role_pairs.setdefault(
-                    pair_key,
-                    {
-                        "partner": other.username,
-                        "player_role": player.role,
-                        "partner_role": other.role,
-                        "relation": relation,
-                        "games": 0,
-                        "wins": 0,
-                        "losses": 0,
-                    },
-                )
-                pair["games"] += 1
-                if player_won is True:
-                    pair["wins"] += 1
-                elif player_won is False:
-                    pair["losses"] += 1
 
     if not relevant:
         return None
@@ -417,8 +385,8 @@ def build_player_social_stats(
     nemesis = max(
         opponent_eligible,
         key=lambda rel: (
-            rel["opponent_losses"],
             100.0 - rel["opponent_win_rate"],
+            rel["opponent_losses"],
             rel["opposite_games"],
         ),
         default=None,
@@ -426,8 +394,8 @@ def build_player_social_stats(
     most_dominated = max(
         opponent_eligible,
         key=lambda rel: (
-            rel["opponent_wins"],
             rel["opponent_win_rate"],
+            rel["opponent_wins"],
             rel["opposite_games"],
         ),
         default=None,
@@ -449,24 +417,6 @@ def build_player_social_stats(
         default=None,
     )
 
-    role_pair_list = []
-    for pair in role_pairs.values():
-        games = pair["games"]
-        pair["win_rate"] = (
-            pair["wins"] / games * 100.0
-            if games
-            else 0.0
-        )
-        role_pair_list.append(pair)
-
-    role_pair_list.sort(
-        key=lambda pair: (
-            pair["games"],
-            pair["win_rate"],
-        ),
-        reverse=True,
-    )
-
     return {
         "username": canonical_username,
         "tracking_since": relevant[0].finished_at,
@@ -483,7 +433,6 @@ def build_player_social_stats(
         "most_dominated": most_dominated,
         "best_res_partner": best_res_partner,
         "best_spy_partner": best_spy_partner,
-        "role_pairs": role_pair_list,
     }
 
 
@@ -503,7 +452,6 @@ def build_pair_social_stats(
     opposite_games = p1_opponent_wins = p2_opponent_wins = 0
     res_games = res_wins = res_losses = 0
     spy_games = spy_wins = spy_losses = 0
-    role_pairs: dict[tuple[str, str], dict[str, Any]] = {}
 
     for match in matches:
         p1 = next(
@@ -572,48 +520,8 @@ def build_pair_social_stats(
             if p2_won is True:
                 p2_opponent_wins += 1
 
-        if p1.role and p2.role:
-            key = (p1.role.casefold(), p2.role.casefold())
-            record = role_pairs.setdefault(
-                key,
-                {
-                    "player_one_role": p1.role,
-                    "player_two_role": p2.role,
-                    "relation": (
-                        "same"
-                        if same_alignment
-                        else "opposite"
-                        if opposite_alignment
-                        else "unknown"
-                    ),
-                    "games": 0,
-                    "player_one_wins": 0,
-                    "player_two_wins": 0,
-                    "shared_wins": 0,
-                    "shared_losses": 0,
-                },
-            )
-            record["games"] += 1
-
-            if same_alignment:
-                if p1_won is True:
-                    record["shared_wins"] += 1
-                elif p1_won is False:
-                    record["shared_losses"] += 1
-            else:
-                if p1_won is True:
-                    record["player_one_wins"] += 1
-                if p2_won is True:
-                    record["player_two_wins"] += 1
-
     if not relevant:
         return None
-
-    role_pair_list = sorted(
-        role_pairs.values(),
-        key=lambda record: record["games"],
-        reverse=True,
-    )
 
     total = len(relevant)
 
@@ -656,5 +564,4 @@ def build_pair_social_stats(
             if spy_games
             else 0.0
         ),
-        "role_pairs": role_pair_list,
     }
