@@ -67,4 +67,43 @@ if [ "${CRAIG_SKIP_MIGRATIONS:-false}" != "true" ]; then
   "$PRISMA_CLI" migrate deploy --config "$PRISMA_CONFIG"
 fi
 
+if [ "${DISCORD_COMMANDS_DISABLED:-false}" = "true" ]; then
+  echo "Removing Discord application commands for the dedicated recorder bot..."
+  node --input-type=module <<'NODE'
+const token = (process.env.BOT_TOKEN || '').replace(/^Bot\s+/i, '');
+const applicationId = process.env.BOT_APPLICATION_ID || '';
+const guildId = process.env.DEVELOPMENT_GUILD_ID || '';
+
+if (!token || !applicationId) {
+  console.warn('Skipping command removal because BOT_TOKEN or BOT_APPLICATION_ID is missing.');
+  process.exit(0);
+}
+
+async function clearCommands(path, label) {
+  const response = await fetch(`https://discord.com/api/v10${path}`, {
+    method: 'PUT',
+    headers: {
+      Authorization: `Bot ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body: '[]'
+  });
+  if (!response.ok) {
+    console.warn(`Could not remove ${label} commands: HTTP ${response.status} ${await response.text()}`);
+    return false;
+  }
+  console.log(`Removed ${label} commands.`);
+  return true;
+}
+
+await clearCommands(`/applications/${applicationId}/commands`, 'global');
+if (guildId) {
+  await clearCommands(
+    `/applications/${applicationId}/guilds/${guildId}/commands`,
+    'server-specific'
+  );
+}
+NODE
+fi
+
 exec pm2-runtime /opt/craig/ecosystem.config.cjs
