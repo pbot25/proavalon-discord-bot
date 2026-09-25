@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from aiohttp import ClientSession, web
 
 from database.discord_roles import get_active_season_linked_users
-from database.seasons import get_active_season
+from database.seasons import get_active_season, season_display_name
 from database.recording_integrations import (
     delete_recording_integration,
     get_recording_integration,
@@ -344,6 +344,7 @@ class RecorderBridge:
         links = {}
         recording_config = None
         voice_channels = []
+        season = None
         guild_id_text = request.query.get("guild_id", "").strip()
         if guild_id_text:
             try:
@@ -385,6 +386,15 @@ class RecorderBridge:
                 }
         return web.json_response({
             "observed_at": datetime.now(timezone.utc).isoformat(),
+            "active_season": (
+                {
+                    "season_number": int(season["season_number"]),
+                    "required_prefix": str(season["required_prefix"]),
+                    "display_name": season_display_name(season),
+                }
+                if season is not None
+                else None
+            ),
             "lobbies": tracker.get_recorder_lobby_snapshot(),
             "account_links": links,
             "recording_config": recording_config,

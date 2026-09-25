@@ -33,7 +33,8 @@ class Controller:
         self.bridge_url = os.environ["RECORDER_BRIDGE_URL"].rstrip("/")
         self.bridge_secret = os.environ["RECORDER_BRIDGE_SECRET"]
         self.guild_id = int(os.environ["DISCORD_GUILD_ID"])
-        self.season_prefix = os.getenv("RECORDER_SEASON_PREFIX", "S4").casefold()
+        self.season_prefix = os.getenv("RECORDER_SEASON_PREFIX", "").strip().casefold()
+        self.reported_season_prefix: str | None = None
         self.control_url = os.getenv("CRAIG_CONTROL_URL", "http://127.0.0.1:9300").rstrip("/")
         self.control_token = os.environ["CRAIG_CONTROL_TOKEN"]
         self.ferret_url = os.getenv("CRAIG_DOWNLOAD_URL", "http://127.0.0.1:9100").rstrip("/")
@@ -70,6 +71,17 @@ class Controller:
         )
 
     def candidate(self, payload, *, exclude_room=None):
+        active_season = payload.get("active_season") or {}
+        season_prefix = str(
+            (active_season.get("required_prefix") or "")
+            if "active_season" in payload
+            else self.season_prefix
+        ).strip().casefold()
+        if not season_prefix:
+            return None
+        if season_prefix != self.reported_season_prefix:
+            print(f"Following Pbot's active season prefix: {season_prefix}")
+            self.reported_season_prefix = season_prefix
         links = payload.get("account_links") or {}
         voice_channels = payload.get("voice_channels") or []
         candidates = []
@@ -82,7 +94,7 @@ class Controller:
                 continue
             if room_id == exclude_room or status != "game in progress" or len(players) != 10:
                 continue
-            if not all(name.casefold().startswith(self.season_prefix) for name in players):
+            if not all(name.casefold().startswith(season_prefix) for name in players):
                 continue
             linked_ids = {int(links[name.casefold()]) for name in players if name.casefold() in links}
             for channel in voice_channels:

@@ -32,9 +32,10 @@ SOCKET_URL = "wss://proavalon.com/socket.io/?EIO=4&transport=websocket"
 class PbotBridgeClient:
     """Read pbot's authenticated live-lobby snapshots from Railway."""
 
-    def __init__(self, url: str, secret: str) -> None:
+    def __init__(self, url: str, secret: str, guild_id: int) -> None:
         self.url = url.rstrip("/") + "/recorder/lobbies"
         self.secret = secret
+        self.guild_id = guild_id
         self.session: aiohttp.ClientSession | None = None
 
     async def start(self) -> None:
@@ -48,6 +49,25 @@ class PbotBridgeClient:
             await self.session.close()
             self.session = None
 
+    async def snapshot(self) -> dict:
+        if self.session is None:
+            raise RuntimeError("Pbot bridge session is not running.")
+        async with self.session.get(
+            self.url,
+            params={"guild_id": str(self.guild_id)},
+        ) as response:
+            if response.status != 200:
+                raise RuntimeError(
+                    f"Pbot bridge returned HTTP {response.status}."
+                )
+            return await response.json()
+
+    async def active_season_prefix(self) -> str | None:
+        payload = await self.snapshot()
+        active_season = payload.get("active_season") or {}
+        prefix = str(active_season.get("required_prefix") or "").strip()
+        return prefix or None
+
     async def find_replacement(
         self,
         *,
@@ -59,11 +79,13 @@ class PbotBridgeClient:
         if self.session is None:
             return None
         try:
-            async with self.session.get(self.url) as response:
-                if response.status != 200:
-                    return None
-                payload = await response.json()
-        except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
+            payload = await self.snapshot()
+        except (
+            aiohttp.ClientError,
+            asyncio.TimeoutError,
+            RuntimeError,
+            ValueError,
+        ):
             return None
 
         previous = {name.casefold() for name in old_players}
@@ -192,13 +214,58 @@ class LobbyWatcher:
             self.current_room = None
 
     async def wait_for_qualifying_room(
-        self, prefix: str, preferred_room_id: int | None = None
-    ) -> tuple[int, list[str], int]:
+        self,
+        prefix: str,
+        preferred_room_id: int | None = None,
+        prefix_provider=None,
+    ) -> tuple[int, list[str], int, str]:
         inspected: set[int] = set()
-        normalized_prefix = prefix.casefold()
-        print(f"Waiting for a public 10-player `{prefix}` lobby...")
+        current_prefix = prefix
+        normalized_prefix = current_prefix.casefold()
+        next_prefix_check = 0.0
+        print(f"Waiting for a public 10-player `{current_prefix}` lobby...")
         while True:
             self.raise_if_stopped()
+            now = time.monotonic()
+            if prefix_provider is not None and now >= next_prefix_check:
+                next_prefix_check = now + 5.0
+                try:
+                    dynamic_prefix = await prefix_provider()
+                except (
+                    aiohttp.ClientError,
+                    asyncio.TimeoutError,
+                    RuntimeError,
+                    ValueError,
+                ):
+                    dynamic_prefix = current_prefix
+                if (
+                    dynamic_prefix is None
+                    and normalized_prefix
+                ):
+                    current_prefix = ""
+                    normalized_prefix = ""
+                    inspected.clear()
+                    print(
+                        "Pbot has no active season; lobby recording is paused."
+                    )
+                elif (
+                    dynamic_prefix is not None
+                    and dynamic_prefix.casefold() != normalized_prefix
+                ):
+                    current_prefix = dynamic_prefix
+                    normalized_prefix = current_prefix.casefold()
+                    inspected.clear()
+                    print(
+                        "Active season changed; now waiting for a public "
+                        f"10-player `{current_prefix}` lobby..."
+                    )
+            if not normalized_prefix:
+                self.changed.clear()
+                try:
+                    await asyncio.wait_for(self.changed.wait(), timeout=1)
+                except asyncio.TimeoutError:
+                    pass
+                continue
             live_ids = set(self.games)
             inspected.intersection_update(live_ids)
             games = list(self.games.items())
@@ -242,6 +309,7 @@ class LobbyWatcher:
                         room_id,
                         roster,
                         self.ten_player_breaks.get(room_id, 0),
+                        current_prefix,
                     )
 
             self.changed.clear()
@@ -495,11 +563,11 @@ def parse_args():
     args.password = os.getenv("RECORDER_PROAVALON_PASSWORD", "")
     args.bridge_url = os.getenv("RECORDER_BRIDGE_URL", "").strip()
     args.bridge_secret = os.getenv("RECORDER_BRIDGE_SECRET", "").strip()
+    guild_id = os.getenv("DISCORD_GUILD_ID", "").strip()
+    args.guild_id = int(guild_id) if guild_id.isdigit() else None
     args.season_prefix = args.season_prefix.strip()
     if not args.username or not args.password:
         parser.error("Set recorder username and password in .env.")
-    if not args.season_prefix:
-        parser.error("Set --season-prefix or RECORDER_SEASON_PREFIX.")
     if args.postgame_seconds < 0 or args.abandonment_grace_seconds <= 0:
         parser.error("Invalid postgame or abandonment duration.")
     if not 0 <= args.abandonment_player_threshold <= 9:
@@ -508,6 +576,12 @@ def parse_args():
         parser.error("--replacement-player-overlap must be between 1 and 10.")
     if bool(args.bridge_url) != bool(args.bridge_secret):
         parser.error("Set both RECORDER_BRIDGE_URL and RECORDER_BRIDGE_SECRET.")
+    if args.bridge_url and args.guild_id is None:
+        parser.error("Set DISCORD_GUILD_ID when using the Pbot bridge.")
+    if not args.bridge_url and not args.season_prefix:
+        parser.error(
+            "Configure the Pbot bridge or set RECORDER_SEASON_PREFIX as a fallback."
+        )
     args.output_dir = Path(args.output_dir).resolve()
     return args
 
@@ -757,7 +831,11 @@ async def run(args) -> None:
     bridge = None
     conversion_tasks: set[asyncio.Task] = set()
     if args.bridge_url:
-        bridge = PbotBridgeClient(args.bridge_url, args.bridge_secret)
+        bridge = PbotBridgeClient(
+            args.bridge_url,
+            args.bridge_secret,
+            args.guild_id,
+        )
         await bridge.start()
         print("Pbot replacement-lobby bridge enabled.")
     else:
@@ -774,11 +852,34 @@ async def run(args) -> None:
             completed = False
             replacement = None
             try:
+                if bridge is not None:
+                    dynamic_prefix = await bridge.active_season_prefix()
+                    if dynamic_prefix is None:
+                        raise RuntimeError(
+                            "Pbot has no active season prefix configured."
+                        )
+                    elif dynamic_prefix.casefold() != args.season_prefix.casefold():
+                        args.season_prefix = dynamic_prefix
+                        print(
+                            "Following Pbot's active season prefix: "
+                            f"{args.season_prefix}"
+                        )
                 watcher = LobbyWatcher(args.username, args.password)
                 await watcher.start()
                 cookies = watcher.browser_cookies()
-                room_id, roster, break_token = await watcher.wait_for_qualifying_room(
-                    args.season_prefix, preferred_room_id=preferred_room_id
+                (
+                    room_id,
+                    roster,
+                    break_token,
+                    args.season_prefix,
+                ) = await watcher.wait_for_qualifying_room(
+                    args.season_prefix,
+                    preferred_room_id=preferred_room_id,
+                    prefix_provider=(
+                        bridge.active_season_prefix
+                        if bridge is not None
+                        else None
+                    ),
                 )
                 completed, replacement = await record_selected_room(
                     playwright,
