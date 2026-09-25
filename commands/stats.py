@@ -1003,6 +1003,7 @@ def build_social_embed(
             if nemesis is None
             else (
                 f"`{nemesis['username']}` — "
+                f"{nemesis['opponent_wins']}W–{nemesis['opponent_losses']}L • "
                 f"**{100.0 - nemesis['opponent_win_rate']:.1f}% loss rate** • "
                 f"{nemesis['opposite_games']} opponent games"
             )
@@ -1018,6 +1019,7 @@ def build_social_embed(
             if dominated is None
             else (
                 f"`{dominated['username']}` — "
+                f"{dominated['opponent_wins']}W–{dominated['opponent_losses']}L • "
                 f"**{dominated['opponent_win_rate']:.1f}% WR** • "
                 f"{dominated['opposite_games']} opponent games"
             )
@@ -1820,6 +1822,7 @@ class StatsCommands(
                 (
                     f"**{index}.** `{row['username']}` — "
                     f"**{float(row['same_win_rate']):.1f}% WR** "
+                    f"• {int(row['same_wins'])}W–{int(row['same_losses'])}L "
                     f"• {int(row['same_games'])} games together"
                 )
                 for index, row in enumerate(relationships[:10], start=1)
@@ -1844,6 +1847,7 @@ class StatsCommands(
                 (
                     f"**{index}.** `{row['username']}` — "
                     f"**{float(row['same_win_rate']):.1f}% WR** "
+                    f"• {int(row['same_wins'])}W–{int(row['same_losses'])}L "
                     f"• {int(row['same_games'])} games together"
                 )
                 for index, row in enumerate(relationships[:10], start=1)
@@ -1893,6 +1897,8 @@ class StatsCommands(
                 (
                     f"**{index}.** `{row['username']}` — "
                     f"**{float(row['opponent_win_rate']):.1f}% WR** "
+                    f"• {int(row['opponent_wins'])}W–"
+                    f"{int(row['opponent_losses'])}L "
                     f"• {int(row['opposite_games'])} opponent games"
                 )
                 for index, row in enumerate(relationships[:10], start=1)
@@ -1917,6 +1923,8 @@ class StatsCommands(
                 (
                     f"**{index}.** `{row['username']}` — "
                     f"**{100.0 - float(row['opponent_win_rate']):.1f}% loss rate** "
+                    f"• {int(row['opponent_wins'])}W–"
+                    f"{int(row['opponent_losses'])}L "
                     f"• {int(row['opposite_games'])} opponent games"
                 )
                 for index, row in enumerate(relationships[:10], start=1)
