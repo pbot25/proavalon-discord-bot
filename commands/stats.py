@@ -55,6 +55,14 @@ SOCIAL_LIST_CHOICES = [
         value="teammates",
     ),
     app_commands.Choice(
+        name="Best Teammates",
+        value="best-teammates",
+    ),
+    app_commands.Choice(
+        name="Worst Teammates",
+        value="worst-teammates",
+    ),
+    app_commands.Choice(
         name="Rivals",
         value="rivals",
     ),
@@ -995,8 +1003,6 @@ def build_social_embed(
             if nemesis is None
             else (
                 f"`{nemesis['username']}` — "
-                f"**{nemesis['opponent_wins']}–{nemesis['opponent_losses']}** "
-                f"head-to-head • "
                 f"**{100.0 - nemesis['opponent_win_rate']:.1f}% loss rate** • "
                 f"{nemesis['opposite_games']} opponent games"
             )
@@ -1012,8 +1018,6 @@ def build_social_embed(
             if dominated is None
             else (
                 f"`{dominated['username']}` — "
-                f"**{dominated['opponent_wins']}–{dominated['opponent_losses']}** "
-                f"head-to-head • "
                 f"**{dominated['opponent_win_rate']:.1f}% WR** • "
                 f"{dominated['opposite_games']} opponent games"
             )
@@ -1797,6 +1801,54 @@ class StatsCommands(
                 for index, row in enumerate(relationships[:10], start=1)
             ]
 
+        elif category.value == "best-teammates":
+            relationships = [
+                row
+                for row in relationships
+                if int(row["same_games"]) >= minimum
+            ]
+            relationships.sort(
+                key=lambda row: (
+                    -float(row["same_win_rate"]),
+                    -int(row["same_games"]),
+                    -int(row["same_wins"]),
+                    str(row["username"]).casefold(),
+                )
+            )
+            title = f"{resolved} — Best Teammates"
+            lines = [
+                (
+                    f"**{index}.** `{row['username']}` — "
+                    f"**{float(row['same_win_rate']):.1f}% WR** "
+                    f"• {int(row['same_games'])} games together"
+                )
+                for index, row in enumerate(relationships[:10], start=1)
+            ]
+
+        elif category.value == "worst-teammates":
+            relationships = [
+                row
+                for row in relationships
+                if int(row["same_games"]) >= minimum
+            ]
+            relationships.sort(
+                key=lambda row: (
+                    float(row["same_win_rate"]),
+                    -int(row["same_games"]),
+                    -int(row["same_losses"]),
+                    str(row["username"]).casefold(),
+                )
+            )
+            title = f"{resolved} — Worst Teammates"
+            lines = [
+                (
+                    f"**{index}.** `{row['username']}` — "
+                    f"**{float(row['same_win_rate']):.1f}% WR** "
+                    f"• {int(row['same_games'])} games together"
+                )
+                for index, row in enumerate(relationships[:10], start=1)
+            ]
+
         elif category.value == "rivals":
             relationships = [
                 row
@@ -1815,7 +1867,7 @@ class StatsCommands(
                 (
                     f"**{index}.** `{row['username']}` — "
                     f"**{int(row['opposite_games'])} game(s) opposite** "
-                    f"• H2H {int(row['opponent_wins'])}-"
+                    f"• {int(row['opponent_wins'])}-"
                     f"{int(row['opponent_losses'])} "
                     f"• {float(row['opponent_win_rate']):.1f}% WR"
                 )
@@ -1841,8 +1893,6 @@ class StatsCommands(
                 (
                     f"**{index}.** `{row['username']}` — "
                     f"**{float(row['opponent_win_rate']):.1f}% WR** "
-                    f"• H2H {int(row['opponent_wins'])}-"
-                    f"{int(row['opponent_losses'])} "
                     f"• {int(row['opposite_games'])} opponent games"
                 )
                 for index, row in enumerate(relationships[:10], start=1)
@@ -1867,8 +1917,6 @@ class StatsCommands(
                 (
                     f"**{index}.** `{row['username']}` — "
                     f"**{100.0 - float(row['opponent_win_rate']):.1f}% loss rate** "
-                    f"• H2H {int(row['opponent_wins'])}-"
-                    f"{int(row['opponent_losses'])} "
                     f"• {int(row['opposite_games'])} opponent games"
                 )
                 for index, row in enumerate(relationships[:10], start=1)
