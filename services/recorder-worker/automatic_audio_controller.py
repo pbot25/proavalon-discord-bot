@@ -33,6 +33,7 @@ class Controller:
         self.bridge_url = os.environ["RECORDER_BRIDGE_URL"].rstrip("/")
         self.bridge_secret = os.environ["RECORDER_BRIDGE_SECRET"]
         self.guild_id = int(os.environ["DISCORD_GUILD_ID"])
+        self.recorder_id = os.getenv("RECORDER_INSTANCE_ID", "recorder-1").strip()
         self.season_prefix = os.getenv("RECORDER_SEASON_PREFIX", "").strip().casefold()
         self.reported_season_prefix: str | None = None
         self.control_url = os.getenv("CRAIG_CONTROL_URL", "http://127.0.0.1:9300").rstrip("/")
@@ -84,6 +85,11 @@ class Controller:
             self.reported_season_prefix = season_prefix
         links = payload.get("account_links") or {}
         voice_channels = payload.get("voice_channels") or []
+        claimed_rooms = {
+            int(claim["room_id"])
+            for claim in payload.get("room_claims") or []
+            if str(claim.get("recorder_id") or "") == self.recorder_id
+        }
         candidates = []
         for lobby in payload.get("lobbies") or []:
             try:
@@ -93,6 +99,8 @@ class Controller:
             except (KeyError, TypeError, ValueError):
                 continue
             if room_id == exclude_room or status != "game in progress" or len(players) != 10:
+                continue
+            if room_id not in claimed_rooms:
                 continue
             if not all(name.casefold().startswith(season_prefix) for name in players):
                 continue

@@ -3,6 +3,8 @@ from __future__ import annotations
 import hmac
 import html
 import os
+import asyncio
+import time
 from datetime import datetime, timezone
 
 from aiohttp import ClientSession, web
@@ -37,6 +39,8 @@ class RecorderBridge:
         self.secret = os.getenv("RECORDER_BRIDGE_SECRET", "").strip()
         self.port = int(os.getenv("PORT", "8080"))
         self.runner: web.AppRunner | None = None
+        self.room_claims: dict[tuple[int, int], dict[str, object]] = {}
+        self.claim_lock = asyncio.Lock()
 
     async def start(self) -> None:
         youtube_configured = all(os.getenv(name, "").strip() for name in (
@@ -53,6 +57,9 @@ class RecorderBridge:
         app.router.add_get("/health", self.health)
         if self.secret:
             app.router.add_get("/recorder/lobbies", self.lobbies)
+            app.router.add_post("/recorder/claims", self.claim_room)
+            app.router.add_post("/recorder/claims/heartbeat", self.heartbeat_claim)
+            app.router.add_delete("/recorder/claims", self.release_claim)
             app.router.add_post(
                 "/recorder/youtube/uploads/start", self.youtube_upload_start
             )
@@ -204,6 +211,69 @@ class RecorderBridge:
         expected = f"Bearer {self.secret}"
         if not self.secret or not hmac.compare_digest(supplied, expected):
             raise web.HTTPUnauthorized()
+
+    @staticmethod
+    def _claim_identity(body: dict) -> tuple[int, int, str]:
+        try:
+            guild_id = int(body["guild_id"])
+            room_id = int(body["room_id"])
+            recorder_id = str(body["recorder_id"]).strip()
+        except (KeyError, TypeError, ValueError):
+            raise web.HTTPBadRequest(
+                text="guild_id, room_id, and recorder_id are required."
+            )
+        if guild_id <= 0 or room_id <= 0 or not recorder_id:
+            raise web.HTTPBadRequest(text="The recorder claim identity is invalid.")
+        return guild_id, room_id, recorder_id
+
+    def _discard_expired_claims(self) -> None:
+        now = time.monotonic()
+        expired = [
+            key for key, claim in self.room_claims.items()
+            if float(claim["expires_at"]) <= now
+        ]
+        for key in expired:
+            self.room_claims.pop(key, None)
+
+    async def claim_room(self, request: web.Request) -> web.Response:
+        self._authorize_recorder(request)
+        guild_id, room_id, recorder_id = self._claim_identity(await request.json())
+        async with self.claim_lock:
+            self._discard_expired_claims()
+            key = (guild_id, room_id)
+            current = self.room_claims.get(key)
+            if current is not None and current["recorder_id"] != recorder_id:
+                return web.json_response({
+                    "claimed": False,
+                    "recorder_id": current["recorder_id"],
+                })
+            self.room_claims[key] = {
+                "recorder_id": recorder_id,
+                "expires_at": time.monotonic() + 15,
+            }
+        return web.json_response({"claimed": True, "recorder_id": recorder_id})
+
+    async def heartbeat_claim(self, request: web.Request) -> web.Response:
+        self._authorize_recorder(request)
+        guild_id, room_id, recorder_id = self._claim_identity(await request.json())
+        async with self.claim_lock:
+            self._discard_expired_claims()
+            key = (guild_id, room_id)
+            current = self.room_claims.get(key)
+            if current is None or current["recorder_id"] != recorder_id:
+                return web.json_response({"claimed": False})
+            current["expires_at"] = time.monotonic() + 15
+        return web.json_response({"claimed": True})
+
+    async def release_claim(self, request: web.Request) -> web.Response:
+        self._authorize_recorder(request)
+        guild_id, room_id, recorder_id = self._claim_identity(await request.json())
+        async with self.claim_lock:
+            key = (guild_id, room_id)
+            current = self.room_claims.get(key)
+            if current is not None and current["recorder_id"] == recorder_id:
+                self.room_claims.pop(key, None)
+        return web.json_response({"ok": True})
 
     async def _youtube_access_token(self, integration) -> str:
         refresh_token = decrypt_refresh_token(
@@ -384,6 +454,17 @@ class RecorderBridge:
                     for row in rows
                     if row["discord_user_id"] is not None
                 }
+        async with self.claim_lock:
+            self._discard_expired_claims()
+            claims = [
+                {
+                    "guild_id": claim_guild_id,
+                    "room_id": room_id,
+                    "recorder_id": claim["recorder_id"],
+                }
+                for (claim_guild_id, room_id), claim in self.room_claims.items()
+                if not guild_id_text or claim_guild_id == int(guild_id_text)
+            ]
         return web.json_response({
             "observed_at": datetime.now(timezone.utc).isoformat(),
             "active_season": (
@@ -399,4 +480,5 @@ class RecorderBridge:
             "account_links": links,
             "recording_config": recording_config,
             "voice_channels": voice_channels,
+            "room_claims": claims,
         })

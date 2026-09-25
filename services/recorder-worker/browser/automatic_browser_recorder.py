@@ -32,10 +32,11 @@ SOCKET_URL = "wss://proavalon.com/socket.io/?EIO=4&transport=websocket"
 class PbotBridgeClient:
     """Read pbot's authenticated live-lobby snapshots from Railway."""
 
-    def __init__(self, url: str, secret: str, guild_id: int) -> None:
+    def __init__(self, url: str, secret: str, guild_id: int, recorder_id: str) -> None:
         self.url = url.rstrip("/") + "/recorder/lobbies"
         self.secret = secret
         self.guild_id = guild_id
+        self.recorder_id = recorder_id
         self.session: aiohttp.ClientSession | None = None
 
     async def start(self) -> None:
@@ -68,6 +69,39 @@ class PbotBridgeClient:
         prefix = str(active_season.get("required_prefix") or "").strip()
         return prefix or None
 
+    async def _claim_request(self, method: str, suffix: str, room_id: int) -> dict:
+        if self.session is None:
+            raise RuntimeError("Pbot bridge session is not running.")
+        async with self.session.request(
+            method,
+            self.url.replace("/recorder/lobbies", suffix),
+            json={
+                "guild_id": self.guild_id,
+                "room_id": room_id,
+                "recorder_id": self.recorder_id,
+            },
+        ) as response:
+            if response.status != 200:
+                raise RuntimeError(f"Pbot claim service returned HTTP {response.status}.")
+            return await response.json()
+
+    async def claim_room(self, room_id: int) -> bool:
+        result = await self._claim_request("POST", "/recorder/claims", room_id)
+        return bool(result.get("claimed"))
+
+    async def heartbeat_room(self, room_id: int) -> bool:
+        result = await self._claim_request(
+            "POST", "/recorder/claims/heartbeat", room_id
+        )
+        if result.get("claimed"):
+            return True
+        # Pbot restarts clear its in-memory leases. Reclaim the same room
+        # instead of interrupting an otherwise healthy recording.
+        return await self.claim_room(room_id)
+
+    async def release_room(self, room_id: int) -> None:
+        await self._claim_request("DELETE", "/recorder/claims", room_id)
+
     async def find_replacement(
         self,
         *,
@@ -90,6 +124,11 @@ class PbotBridgeClient:
 
         previous = {name.casefold() for name in old_players}
         prefix = season_prefix.casefold()
+        claims = {
+            int(claim["room_id"]): str(claim.get("recorder_id") or "")
+            for claim in payload.get("room_claims") or []
+            if claim.get("room_id") is not None
+        }
         for lobby in payload.get("lobbies", []):
             try:
                 room_id = int(lobby.get("room_id"))
@@ -105,6 +144,7 @@ class PbotBridgeClient:
             overlap = previous.intersection(name.casefold() for name in players)
             if (
                 room_id != old_room_id
+                and claims.get(room_id, self.recorder_id) == self.recorder_id
                 and count == 10
                 and maximum == 10
                 and not lobby.get("password_locked", False)
@@ -218,8 +258,12 @@ class LobbyWatcher:
         prefix: str,
         preferred_room_id: int | None = None,
         prefix_provider=None,
+        room_claim=None,
+        room_release=None,
+        claim_delay_seconds: float = 0,
     ) -> tuple[int, list[str], int, str]:
         inspected: set[int] = set()
+        claim_delay_pending = claim_delay_seconds
         current_prefix = prefix
         normalized_prefix = current_prefix.casefold()
         next_prefix_check = 0.0
@@ -288,6 +332,13 @@ class LobbyWatcher:
                     or room_id in inspected
                 ):
                     continue
+                if room_claim is not None:
+                    if claim_delay_pending:
+                        await asyncio.sleep(claim_delay_pending)
+                        claim_delay_pending = 0
+                    if not await room_claim(room_id):
+                        inspected.discard(room_id)
+                        continue
                 inspected.add(room_id)
                 roster = await self.inspect_roster(room_id)
                 if len(roster) == 10 and all(
@@ -311,6 +362,8 @@ class LobbyWatcher:
                         self.ten_player_breaks.get(room_id, 0),
                         current_prefix,
                     )
+                if room_release is not None:
+                    await room_release(room_id)
 
             self.changed.clear()
             try:
@@ -563,6 +616,13 @@ def parse_args():
     args.password = os.getenv("RECORDER_PROAVALON_PASSWORD", "")
     args.bridge_url = os.getenv("RECORDER_BRIDGE_URL", "").strip()
     args.bridge_secret = os.getenv("RECORDER_BRIDGE_SECRET", "").strip()
+    args.recorder_id = os.getenv("RECORDER_INSTANCE_ID", "recorder-1").strip()
+    try:
+        args.claim_delay_seconds = max(
+            0.0, float(os.getenv("RECORDER_CLAIM_DELAY_SECONDS", "0"))
+        )
+    except ValueError:
+        parser.error("RECORDER_CLAIM_DELAY_SECONDS must be a number.")
     guild_id = os.getenv("DISCORD_GUILD_ID", "").strip()
     args.guild_id = int(guild_id) if guild_id.isdigit() else None
     args.season_prefix = args.season_prefix.strip()
@@ -578,6 +638,8 @@ def parse_args():
         parser.error("Set both RECORDER_BRIDGE_URL and RECORDER_BRIDGE_SECRET.")
     if args.bridge_url and args.guild_id is None:
         parser.error("Set DISCORD_GUILD_ID when using the Pbot bridge.")
+    if args.bridge_url and not args.recorder_id:
+        parser.error("Set RECORDER_INSTANCE_ID when using the Pbot bridge.")
     if not args.bridge_url and not args.season_prefix:
         parser.error(
             "Configure the Pbot bridge or set RECORDER_SEASON_PREFIX as a fallback."
@@ -731,14 +793,21 @@ async def record_selected_room(
                 now = time.monotonic()
                 if (
                     bridge is not None
-                    and lifecycle.game_started
                     and state in {
+                        SessionState.RECORDING_PREGAME,
                         SessionState.RECORDING_GAME,
                         SessionState.POSTGAME,
                     }
                     and now >= next_bridge_check
                 ):
                     next_bridge_check = now + 1.0
+                    if not await bridge.heartbeat_room(room_id):
+                        raise RuntimeError(
+                            f"Recorder lost its Pbot claim for room {room_id}."
+                        )
+                    if not lifecycle.game_started:
+                        await asyncio.sleep(0.25)
+                        continue
                     replacement = await bridge.find_replacement(
                         old_room_id=room_id,
                         old_players=original_roster,
@@ -835,6 +904,7 @@ async def run(args) -> None:
             args.bridge_url,
             args.bridge_secret,
             args.guild_id,
+            args.recorder_id,
         )
         await bridge.start()
         print("Pbot replacement-lobby bridge enabled.")
@@ -880,6 +950,9 @@ async def run(args) -> None:
                         if bridge is not None
                         else None
                     ),
+                    room_claim=(bridge.claim_room if bridge is not None else None),
+                    room_release=(bridge.release_room if bridge is not None else None),
+                    claim_delay_seconds=args.claim_delay_seconds,
                 )
                 completed, replacement = await record_selected_room(
                     playwright,
@@ -905,6 +978,12 @@ async def run(args) -> None:
             finally:
                 if watcher is not None:
                     await watcher.close()
+                if bridge is not None and 'room_id' in locals():
+                    try:
+                        await bridge.release_room(room_id)
+                    except Exception as error:
+                        print(f"Could not release room {room_id} claim: {error}")
+                    del room_id
 
             if completed:
                 preferred_room_id = (

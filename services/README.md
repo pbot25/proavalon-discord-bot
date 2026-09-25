@@ -26,3 +26,25 @@ Railway private networking.
 
 Keep the proven local setup available until the hosted worker and Craig have
 completed an end-to-end match test.
+
+## Multiple simultaneous recorders
+
+Each recorder pair consists of one Craig service and one recorder-worker
+service. Give every worker a stable, unique `RECORDER_INSTANCE_ID` such as
+`recorder-1` or `recorder-2`. Pbot atomically leases each ProAvalon room to one
+instance, and the worker's browser and audio controller only operate on the
+room leased to that identity.
+
+Use `RECORDER_CLAIM_DELAY_SECONDS=0` for the primary worker and `3` for the
+secondary worker. This gives Recorder 1 the first opportunity to take a lone
+lobby while still allowing Recorder 2 to take a simultaneous second lobby.
+
+Run each Craig service with its own Discord bot token, control token, Postgres,
+Redis namespace, and `/data` volume. Run each recorder-worker with its own
+ProAvalon account, Craig private-domain URLs, and `/data` volume. Workers may
+share Pbot's bridge URL, bridge secret, Discord guild ID, active season, and
+server-level YouTube connection.
+
+Deploy Pbot before deploying workers that use room claims. A claim expires
+automatically when its worker stops heartbeating, so a crashed worker cannot
+reserve a room permanently.
