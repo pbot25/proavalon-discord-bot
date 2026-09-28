@@ -61,7 +61,11 @@ class Controller:
             except (aiohttp.ContentTypeError, json.JSONDecodeError):
                 data = {"error": await response.text()}
             if response.status >= 400:
-                raise RuntimeError(data.get("error") or f"HTTP {response.status}")
+                detail = data.get("error") or data.get("code")
+                raise RuntimeError(
+                    f"HTTP {response.status}"
+                    + (f": {detail}" if detail is not None else "")
+                )
             return data
 
     async def snapshot(self):

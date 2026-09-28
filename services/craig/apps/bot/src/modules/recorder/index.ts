@@ -146,7 +146,10 @@ export default class RecorderModule extends BotModule {
       }
     }
 
-    await recording.start(parseRewards(this.client.config, 0, 0), false);
+    // Controlled recordings are an internal feature of this dedicated,
+    // self-hosted recorder. Give them the owner tier so Ferret can create the
+    // mixed MP3 required by the ProAvalon media pipeline.
+    await recording.start(parseRewards(this.client.config, -1, -1), false);
     if (recording.state === RecordingState.ERROR) throw new Error(recording.stateDescription || 'Craig failed to start recording.');
     return { id: recording.id, accessKey: recording.accessKey, deleteKey: recording.deleteKey, state: RecordingState[recording.state] };
   }
