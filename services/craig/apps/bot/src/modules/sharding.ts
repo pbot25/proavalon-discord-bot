@@ -69,7 +69,10 @@ export default class ShardingModule extends BotModule {
         }
         case 'eval': {
           try {
-            const result = this.evaluate(message.d.script);
+            // Control-plane expressions may call async recorder methods. Wait
+            // for them here; sending a Promise through process IPC serializes
+            // it as an empty object and loses fields such as id/accessKey.
+            const result = await this.evaluate(message.d.script);
             this.respond(message.n, { result });
           } catch (e) {
             this.respond(message.n, { result: null, error: makePlainError(e as any) });

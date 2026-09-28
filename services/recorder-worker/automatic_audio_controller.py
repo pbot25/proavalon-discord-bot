@@ -121,6 +121,11 @@ class Controller:
         if config.get("output_channel_id"):
             body["postChannelId"] = str(config["output_channel_id"])
         result = await self.request("POST", f"{self.control_url}/recordings/start", json=body)
+        if not result.get("id") or not result.get("accessKey"):
+            raise RuntimeError(
+                "Craig started without returning recording metadata; redeploy "
+                "the Craig async control-response fix."
+            )
         self.active = ActiveRecording(
             room_id=room_id,
             players=players,
