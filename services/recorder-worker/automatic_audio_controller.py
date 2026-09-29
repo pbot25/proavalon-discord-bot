@@ -48,6 +48,11 @@ class Controller:
         self.session: aiohttp.ClientSession | None = None
         self.active: ActiveRecording | None = None
         self.processing_handoffs: set[Path] = set()
+        self.orphan_retention_seconds = max(
+            3600,
+            int(os.getenv("RECORDER_ORPHAN_RETENTION_HOURS", "24")) * 3600,
+        )
+        self.next_cleanup_at = 0.0
         self.ssl_context = ssl.create_default_context(cafile=certifi.where())
 
     async def request(self, method: str, url: str, *, bridge=False, **kwargs):
@@ -250,6 +255,8 @@ class Controller:
         try:
             metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
             if metadata.get("youtube_url"):
+                if metadata.get("cleanup_after_upload"):
+                    self.cleanup_completed_recording(metadata_path, metadata)
                 return
             room_id = int(metadata["room_id"])
             video_path = self.matching_video(room_id)
@@ -262,12 +269,103 @@ class Controller:
             youtube_url = await self.upload_to_youtube(final_path, room_id)
             metadata["final_mp4"] = str(final_path)
             metadata["youtube_url"] = youtube_url
+            metadata["cleanup_after_upload"] = True
             metadata_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
             print(f"Uploaded room {room_id} to YouTube: {youtube_url}")
+            self.cleanup_completed_recording(metadata_path, metadata)
         except Exception as error:
             print(f"Room recording handoff will retry: {error}")
         finally:
             self.processing_handoffs.discard(metadata_path)
+
+    def _managed_media_roots(self) -> tuple[Path, ...]:
+        return (
+            self.video_dir.resolve(),
+            self.output_dir.resolve(),
+            self.final_dir.resolve(),
+        )
+
+    def _safe_unlink(self, path: Path) -> int:
+        try:
+            resolved = path.resolve()
+            if not any(resolved.is_relative_to(root) for root in self._managed_media_roots()):
+                return 0
+            if not resolved.is_file():
+                return 0
+            size = resolved.stat().st_size
+            resolved.unlink()
+            return size
+        except OSError:
+            return 0
+
+    def cleanup_completed_recording(self, metadata_path: Path, metadata: dict) -> None:
+        try:
+            room_id = int(metadata["room_id"])
+        except (KeyError, TypeError, ValueError):
+            return
+        paths = {
+            Path(str(metadata.get("mixed_mp3") or "")),
+            Path(str(metadata.get("final_mp4") or "")),
+            self.final_dir / f"proavalon-room-{room_id}-complete.mp4",
+        }
+        if self.video_dir.exists():
+            paths.update(self.video_dir.rglob(f"proavalon-room-{room_id}-*"))
+        freed = sum(self._safe_unlink(path) for path in paths if str(path))
+        freed += self._safe_unlink(metadata_path)
+        print(
+            f"Cleaned uploaded room {room_id} media "
+            f"({freed / (1024 * 1024):.1f} MiB freed)."
+        )
+
+    def cleanup_orphaned_media(self) -> None:
+        protected: set[Path] = set()
+        for metadata_path in self.output_dir.glob("room-*-craig.json"):
+            try:
+                metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError, json.JSONDecodeError):
+                continue
+            if metadata.get("youtube_url") and metadata.get("cleanup_after_upload"):
+                self.cleanup_completed_recording(metadata_path, metadata)
+                continue
+            protected.add(metadata_path.resolve())
+            for key in ("mixed_mp3", "final_mp4"):
+                value = str(metadata.get(key) or "")
+                if value:
+                    protected.add(Path(value).resolve())
+            try:
+                room_id = int(metadata["room_id"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if self.video_dir.exists():
+                protected.update(
+                    path.resolve()
+                    for path in self.video_dir.rglob(f"proavalon-room-{room_id}-*")
+                )
+
+        cutoff = time.time() - self.orphan_retention_seconds
+        candidates: list[Path] = []
+        if self.video_dir.exists():
+            candidates.extend(path for path in self.video_dir.rglob("*") if path.is_file())
+        candidates.extend(self.output_dir.glob("proavalon-room-*-audio.mp3"))
+        candidates.extend(self.final_dir.glob("proavalon-room-*-complete.mp4"))
+        freed = 0
+        removed = 0
+        for path in candidates:
+            try:
+                if path.resolve() in protected or path.stat().st_mtime >= cutoff:
+                    continue
+            except OSError:
+                continue
+            size = self._safe_unlink(path)
+            if size:
+                freed += size
+                removed += 1
+        if removed:
+            print(
+                f"Cleaned {removed} orphaned recorder files older than "
+                f"{self.orphan_retention_seconds // 3600}h "
+                f"({freed / (1024 * 1024):.1f} MiB freed)."
+            )
 
     def process_handoffs(self) -> None:
         for metadata_path in sorted(self.output_dir.glob("room-*-craig.json")):
@@ -278,6 +376,8 @@ class Controller:
             except (OSError, ValueError, json.JSONDecodeError):
                 continue
             if metadata.get("youtube_url"):
+                if metadata.get("cleanup_after_upload"):
+                    self.cleanup_completed_recording(metadata_path, metadata)
                 continue
             self.processing_handoffs.add(metadata_path)
             asyncio.create_task(self._process_handoff(metadata_path))
@@ -330,6 +430,10 @@ class Controller:
     async def tick(self):
         payload = await self.snapshot()
         self.process_handoffs()
+        now = time.monotonic()
+        if now >= self.next_cleanup_at:
+            self.next_cleanup_at = now + 600
+            self.cleanup_orphaned_media()
         config = payload.get("recording_config") or {}
         if self.active is None:
             if config.get("enabled"):
