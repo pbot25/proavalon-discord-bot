@@ -656,24 +656,31 @@ async def finalize_recording(
     duration_seconds: float,
     keep_webm: bool,
 ) -> None:
+    converting_path = mp4_path.with_name(
+        f"{mp4_path.stem}.converting{mp4_path.suffix}"
+    )
     try:
+        converting_path.unlink(missing_ok=True)
         converted = await asyncio.to_thread(
             convert_webm_to_mp4,
             webm_path,
-            mp4_path,
+            converting_path,
             trim_start_seconds=trim_start_seconds,
             duration_seconds=duration_seconds,
         )
         if not converted:
+            converting_path.unlink(missing_ok=True)
             print(
                 "Background FFmpeg conversion failed; raw recording retained at "
                 f"{webm_path}."
             )
             return
+        converting_path.replace(mp4_path)
         if not keep_webm:
             webm_path.unlink(missing_ok=True)
         print(f"Completed automatic recording: {mp4_path}")
     except Exception as error:
+        converting_path.unlink(missing_ok=True)
         print(
             f"Background recording conversion error: {error}. "
             f"Raw recording retained at {webm_path}."

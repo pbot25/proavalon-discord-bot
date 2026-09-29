@@ -177,7 +177,11 @@ class Controller:
     def matching_video(self, room_id: int) -> Path | None:
         if not self.video_dir.exists():
             return None
-        matches = list(self.video_dir.rglob(f"proavalon-room-{room_id}-*.mp4"))
+        matches = [
+            path
+            for path in self.video_dir.rglob(f"proavalon-room-{room_id}-*.mp4")
+            if ".converting." not in path.name and path.stat().st_size > 0
+        ]
         return max(matches, key=lambda path: path.stat().st_mtime, default=None)
 
     def combine_recording(self, video_path: Path, audio_path: Path, room_id: int) -> Path:
