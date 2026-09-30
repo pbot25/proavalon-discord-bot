@@ -432,7 +432,28 @@ class RecorderBridge:
                             value=value,
                             inline=False,
                         )
-                    await message.edit(embed=embed)
+                    # Fetched embeds expose an uploaded attachment as its CDN
+                    # URL. Reusing that URL while retaining the attachment
+                    # makes Discord render the same voting chart twice: once
+                    # as a standalone attachment and once inside the embed.
+                    # Restore the attachment:// reference during the edit so
+                    # the existing chart remains embedded exactly once.
+                    chart_attachment = next(
+                        (
+                            attachment
+                            for attachment in message.attachments
+                            if attachment.filename == "voting-history.png"
+                        ),
+                        None,
+                    )
+                    if chart_attachment is not None:
+                        embed.set_image(
+                            url=f"attachment://{chart_attachment.filename}"
+                        )
+                    await message.edit(
+                        embed=embed,
+                        attachments=message.attachments,
+                    )
                     await append_recording_audit(
                         guild_id, room_id, "match_history_linked", detail=youtube_url
                     )
