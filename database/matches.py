@@ -200,7 +200,7 @@ async def mark_match_posted(season_id:int, fingerprint:str, channel_id:int|None=
 async def get_match_for_recording(guild_id:int,room_id:int):
     db=await connect()
     try:
-        c=await db.execute("SELECT sm.* FROM season_matches sm JOIN community_seasons cs ON cs.id=sm.community_season_id WHERE cs.guild_id=? AND sm.room_id=? ORDER BY sm.finished_at DESC,sm.id DESC LIMIT 1",(str(guild_id),room_id)); return await c.fetchone()
+        c=await db.execute("SELECT sm.*, COALESCE(NULLIF(TRIM(cs.display_name), ''), 'ProAvalon') AS season_display_name FROM season_matches sm JOIN community_seasons cs ON cs.id=sm.community_season_id WHERE cs.guild_id=? AND sm.room_id=? ORDER BY sm.finished_at DESC,sm.id DESC LIMIT 1",(str(guild_id),room_id)); return await c.fetchone()
     finally: await db.close()
 
 async def set_recording_status(match_database_id:int,status:str):

@@ -350,7 +350,8 @@ class RecorderBridge:
         privacy = os.getenv("YOUTUBE_PRIVACY_STATUS", "unlisted").strip().lower()
         if privacy not in {"private", "unlisted", "public"}:
             privacy = "unlisted"
-        title = f"ProAvalon Match #{match['season_match_id']} — Room {room_id}"
+        season_name = str(match["season_display_name"] or "ProAvalon").strip()
+        title = f"{season_name} Match #{match['season_match_id']}"
         metadata = {
             "snippet": {
                 "title": title,
