@@ -48,6 +48,8 @@ class Controller:
         self.session: aiohttp.ClientSession | None = None
         self.active: ActiveRecording | None = None
         self.processing_handoffs: set[Path] = set()
+        self.handoff_retry_at: dict[Path, float] = {}
+        self.handoff_attempts: dict[Path, int] = {}
         self.orphan_retention_seconds = max(
             3600,
             int(os.getenv("RECORDER_ORPHAN_RETENTION_HOURS", "24")) * 3600,
@@ -305,8 +307,18 @@ class Controller:
             print(f"Uploaded room {room_id} to YouTube: {youtube_url}")
             self.cleanup_completed_recording(metadata_path, metadata)
             await self.audit(room_id, "media_cleanup_completed")
+            self.handoff_retry_at.pop(metadata_path, None)
+            self.handoff_attempts.pop(metadata_path, None)
         except Exception as error:
-            print(f"Room recording handoff will retry: {error}")
+            attempts = self.handoff_attempts.get(metadata_path, 0) + 1
+            self.handoff_attempts[metadata_path] = attempts
+            retry_seconds = min(300, 2 ** min(attempts, 8))
+            self.handoff_retry_at[metadata_path] = time.monotonic() + retry_seconds
+            room_label = str(room_id) if room_id is not None else metadata_path.name
+            print(
+                f"Room {room_label} recording handoff failed: {error}. "
+                f"Retrying in {retry_seconds} seconds."
+            )
             if room_id is not None:
                 await self.audit(room_id, "handoff_failed", str(error))
         finally:
@@ -402,8 +414,11 @@ class Controller:
             )
 
     def process_handoffs(self) -> None:
+        now = time.monotonic()
         for metadata_path in sorted(self.output_dir.glob("room-*-craig.json")):
             if metadata_path in self.processing_handoffs:
+                continue
+            if now < self.handoff_retry_at.get(metadata_path, 0.0):
                 continue
             try:
                 metadata = json.loads(metadata_path.read_text(encoding="utf-8"))

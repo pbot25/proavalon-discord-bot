@@ -376,8 +376,24 @@ class RecorderBridge:
             ) as response:
                 upload_url = response.headers.get("Location")
                 if response.status not in {200, 201} or not upload_url:
+                    try:
+                        failure = await response.json(content_type=None)
+                    except (ValueError, TypeError):
+                        failure = {"error": await response.text()}
+                    error_value = failure.get("error") if isinstance(failure, dict) else None
+                    if isinstance(error_value, dict):
+                        detail = str(
+                            error_value.get("message")
+                            or error_value.get("status")
+                            or error_value
+                        )
+                    else:
+                        detail = str(error_value or failure or "No error detail returned.")
                     raise web.HTTPBadGateway(
-                        text="YouTube did not create an upload session."
+                        text=(
+                            "YouTube did not create an upload session "
+                            f"(upstream HTTP {response.status}): {detail}"
+                        )
                     )
         await set_recording_status(int(match["id"]), "uploading")
         await append_recording_audit(
