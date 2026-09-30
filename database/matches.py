@@ -99,6 +99,22 @@ async def save_match(
                 assassination_duration_seconds,
             ),
         )
+        await db.execute(
+            """
+            INSERT INTO recording_audit_events(
+                guild_id, room_id, stage, detail, created_at
+            )
+            SELECT guild_id, ?, 'match_archived', ?, ?
+            FROM community_seasons
+            WHERE id = ?
+            """,
+            (
+                room_id,
+                f"Season match #{match_id} archived by Pbot.",
+                utc_now(),
+                season_id,
+            ),
+        )
         await db.commit()
         return match_id
     except Exception:

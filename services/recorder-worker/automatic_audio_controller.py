@@ -80,6 +80,24 @@ class Controller:
             bridge=True,
         )
 
+    async def audit(self, room_id: int, stage: str, detail: str | None = None) -> None:
+        try:
+            await self.request(
+                "POST",
+                f"{self.bridge_url}/recorder/audit",
+                bridge=True,
+                json={
+                    "guild_id": self.guild_id,
+                    "room_id": room_id,
+                    "recorder_id": self.recorder_id,
+                    "stage": stage,
+                    "detail": detail,
+                },
+            )
+        except Exception as error:
+            # Audit reporting is diagnostic and must never stop a recording.
+            print(f"Could not persist recording audit for room {room_id}: {error}")
+
     def candidate(self, payload, *, exclude_room=None):
         active_season = payload.get("active_season") or {}
         season_prefix = str(
@@ -143,6 +161,11 @@ class Controller:
             access_key=result["accessKey"],
         )
         print(f"Recording room {room_id} in Discord voice channel {channel_id}.")
+        await self.audit(
+            room_id,
+            "voice_recording_started",
+            f"Discord voice channel {channel_id}; Craig recording {result['id']}.",
+        )
 
     async def stop(self, *, discard: bool):
         assert self.active is not None
@@ -155,17 +178,21 @@ class Controller:
         self.active = None
         if discard:
             print(f"Discarded abandoned room {current.room_id}.")
+            await self.audit(current.room_id, "voice_recording_discarded")
             return
+        await self.audit(current.room_id, "voice_recording_stopped")
         asyncio.create_task(self._prepare_audio_handoff(current, result))
         print(f"Room {current.room_id} stopped; audio processing continues in the background.")
 
     async def _prepare_audio_handoff(self, current: ActiveRecording, result: dict):
         try:
+            await self.audit(current.room_id, "audio_mix_started")
             mixed_path = await self.create_mixed_mp3(
                 result["id"], result["accessKey"], current.room_id
             )
         except Exception as error:
             print(f"Craig mix for room {current.room_id} failed: {error}")
+            await self.audit(current.room_id, "audio_mix_failed", str(error))
             return
         metadata = {
             "room_id": current.room_id,
@@ -178,6 +205,7 @@ class Controller:
         path = self.output_dir / f"room-{current.room_id}-craig.json"
         path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
         print(f"Completed room {current.room_id}; saved Craig handoff metadata to {path}.")
+        await self.audit(current.room_id, "audio_mix_completed", str(mixed_path))
 
     def matching_video(self, room_id: int) -> Path | None:
         if not self.video_dir.exists():
@@ -252,6 +280,7 @@ class Controller:
         return str(complete["youtube_url"])
 
     async def _process_handoff(self, metadata_path: Path) -> None:
+        room_id = None
         try:
             metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
             if metadata.get("youtube_url"):
@@ -263,9 +292,11 @@ class Controller:
             audio_path = Path(metadata["mixed_mp3"])
             if video_path is None or not audio_path.is_file():
                 return
+            await self.audit(room_id, "final_merge_started")
             final_path = await asyncio.to_thread(
                 self.combine_recording, video_path, audio_path, room_id
             )
+            await self.audit(room_id, "final_video_created", str(final_path))
             youtube_url = await self.upload_to_youtube(final_path, room_id)
             metadata["final_mp4"] = str(final_path)
             metadata["youtube_url"] = youtube_url
@@ -273,8 +304,11 @@ class Controller:
             metadata_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
             print(f"Uploaded room {room_id} to YouTube: {youtube_url}")
             self.cleanup_completed_recording(metadata_path, metadata)
+            await self.audit(room_id, "media_cleanup_completed")
         except Exception as error:
             print(f"Room recording handoff will retry: {error}")
+            if room_id is not None:
+                await self.audit(room_id, "handoff_failed", str(error))
         finally:
             self.processing_handoffs.discard(metadata_path)
 

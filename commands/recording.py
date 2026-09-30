@@ -7,6 +7,7 @@ from discord.ext import commands
 from database.recording_integrations import (
     get_recording_integration,
 )
+from database.recording_audit import get_recording_audit
 from utils.permissions import bot_admin_only
 from youtube_oauth import connection_url
 
@@ -104,6 +105,43 @@ class RecordingCommands(
                 f"**YouTube:** {youtube_status}",
                 "**Twitch:** Not available yet",
             )),
+            ephemeral=True,
+        )
+
+    @app_commands.command(
+        name="audit",
+        description="Shows the persistent recording timeline for a ProAvalon room.",
+    )
+    @app_commands.describe(room_id="The ProAvalon room number to inspect")
+    @bot_admin_only()
+    async def audit(self, interaction: discord.Interaction, room_id: int) -> None:
+        if interaction.guild_id is None:
+            await interaction.response.send_message(
+                "This command can only be used in a server.", ephemeral=True
+            )
+            return
+        rows = await get_recording_audit(interaction.guild_id, room_id, limit=20)
+        if not rows:
+            await interaction.response.send_message(
+                f"No recording events were stored for room `{room_id}`.",
+                ephemeral=True,
+            )
+            return
+        lines = []
+        length = len(f"**Recording audit for room {room_id}**\n")
+        for row in rows:
+            timestamp = str(row["created_at"]).replace("T", " ")[:19]
+            recorder = f" • {row['recorder_id']}" if row["recorder_id"] else ""
+            raw_detail = str(row["detail"] or "")
+            detail = f" — {raw_detail[:180]}" if raw_detail else ""
+            line = f"`{timestamp} UTC` **{row['stage']}**{recorder}{detail}"
+            if length + len(line) + 1 > 1900:
+                lines.append("…older events omitted")
+                break
+            lines.append(line)
+            length += len(line) + 1
+        await interaction.response.send_message(
+            f"**Recording audit for room {room_id}**\n" + "\n".join(lines),
             ephemeral=True,
         )
 

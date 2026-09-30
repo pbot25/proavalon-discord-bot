@@ -102,6 +102,26 @@ class PbotBridgeClient:
     async def release_room(self, room_id: int) -> None:
         await self._claim_request("DELETE", "/recorder/claims", room_id)
 
+    async def audit(self, room_id: int, stage: str, detail: str | None = None) -> None:
+        if self.session is None:
+            return
+        try:
+            async with self.session.post(
+                self.url.replace("/recorder/lobbies", "/recorder/audit"),
+                json={
+                    "guild_id": self.guild_id,
+                    "room_id": room_id,
+                    "recorder_id": self.recorder_id,
+                    "stage": stage,
+                    "detail": detail,
+                },
+            ) as response:
+                if response.status != 200:
+                    print(f"Recording audit returned HTTP {response.status}.")
+        except (aiohttp.ClientError, asyncio.TimeoutError):
+            # Audit reporting must never interrupt a recording.
+            pass
+
     async def find_replacement(
         self,
         *,
@@ -655,6 +675,8 @@ async def finalize_recording(
     trim_start_seconds: float,
     duration_seconds: float,
     keep_webm: bool,
+    bridge: PbotBridgeClient | None = None,
+    room_id: int | None = None,
 ) -> None:
     converting_path = mp4_path.with_name(
         f"{mp4_path.stem}.converting{mp4_path.suffix}"
@@ -679,12 +701,16 @@ async def finalize_recording(
         if not keep_webm:
             webm_path.unlink(missing_ok=True)
         print(f"Completed automatic recording: {mp4_path}")
+        if bridge is not None and room_id is not None:
+            await bridge.audit(room_id, "browser_mp4_completed", str(mp4_path))
     except Exception as error:
         converting_path.unlink(missing_ok=True)
         print(
             f"Background recording conversion error: {error}. "
             f"Raw recording retained at {webm_path}."
         )
+        if bridge is not None and room_id is not None:
+            await bridge.audit(room_id, "browser_conversion_failed", str(error))
 
 
 async def record_selected_room(
@@ -735,6 +761,8 @@ async def record_selected_room(
     replacement = None
     next_bridge_check = 0.0
     try:
+        if bridge is not None:
+            await bridge.audit(room_id, "browser_session_opening")
         print("Opening the authenticated ProAvalon recorder session...")
         await page.goto(
             f"{PROAVALON_BASE_URL}/lobby",
@@ -777,6 +805,8 @@ async def record_selected_room(
             print("The lobby dropped below ten while the recorder was preparing.")
         else:
             print("Automatic recording is active.")
+            if bridge is not None:
+                await bridge.audit(room_id, "browser_ready")
 
             last_state = lifecycle.state
             while True:
@@ -850,6 +880,8 @@ async def record_selected_room(
                     if state is SessionState.RECORDING_GAME:
                         game_started_at = time.monotonic()
                         print("Retained recording timeline started with the game.")
+                        if bridge is not None:
+                            await bridge.audit(room_id, "game_recording_started")
                     last_state = state
                 if state is SessionState.COMPLETED:
                     successful = True
@@ -884,6 +916,10 @@ async def record_selected_room(
         webm_path.unlink(missing_ok=True)
         screenshot_path.unlink(missing_ok=True)
         print(f"Discarded {lifecycle.state.value} recording for room {room_id}.")
+        if bridge is not None:
+            await bridge.audit(
+                room_id, "browser_recording_discarded", lifecycle.state.value
+            )
         return False, replacement
 
     duration = max(0.1, stopped_at - game_started_at)
@@ -893,6 +929,8 @@ async def record_selected_room(
         trim_start_seconds=max(0.0, game_started_at - capture_started_at),
         duration_seconds=duration,
         keep_webm=args.keep_webm,
+        bridge=bridge,
+        room_id=room_id,
     ))
     conversion_tasks.add(conversion_task)
     conversion_task.add_done_callback(conversion_tasks.discard)
@@ -900,6 +938,8 @@ async def record_selected_room(
         f"Queued background MP4 conversion for room {room_id}; "
         "resuming lobby detection immediately."
     )
+    if bridge is not None:
+        await bridge.audit(room_id, "browser_conversion_queued")
     return True, replacement
 
 

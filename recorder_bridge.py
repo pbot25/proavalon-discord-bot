@@ -16,6 +16,7 @@ from database.recording_integrations import (
     get_recording_integration,
     save_recording_integration,
 )
+from database.recording_audit import append_recording_audit
 from database.matches import (
     get_match_for_recording,
     save_youtube_recording,
@@ -60,6 +61,7 @@ class RecorderBridge:
             app.router.add_post("/recorder/claims", self.claim_room)
             app.router.add_post("/recorder/claims/heartbeat", self.heartbeat_claim)
             app.router.add_delete("/recorder/claims", self.release_claim)
+            app.router.add_post("/recorder/audit", self.recording_audit)
             app.router.add_post(
                 "/recorder/youtube/uploads/start", self.youtube_upload_start
             )
@@ -275,6 +277,30 @@ class RecorderBridge:
                 self.room_claims.pop(key, None)
         return web.json_response({"ok": True})
 
+    async def recording_audit(self, request: web.Request) -> web.Response:
+        self._authorize_recorder(request)
+        body = await request.json()
+        try:
+            guild_id = int(body["guild_id"])
+            room_id = int(body["room_id"])
+            stage = str(body["stage"]).strip()
+        except (KeyError, TypeError, ValueError):
+            raise web.HTTPBadRequest(
+                text="guild_id, room_id, and stage are required."
+            )
+        if guild_id <= 0 or room_id <= 0 or not stage or len(stage) > 64:
+            raise web.HTTPBadRequest(text="The recording audit event is invalid.")
+        recorder_id = str(body.get("recorder_id") or "").strip() or None
+        detail = str(body.get("detail") or "").strip() or None
+        await append_recording_audit(
+            guild_id,
+            room_id,
+            stage,
+            recorder_id=recorder_id[:128] if recorder_id else None,
+            detail=detail[:1000] if detail else None,
+        )
+        return web.json_response({"ok": True})
+
     async def _youtube_access_token(self, integration) -> str:
         refresh_token = decrypt_refresh_token(
             str(integration["encrypted_refresh_token"])
@@ -353,6 +379,10 @@ class RecorderBridge:
                         text="YouTube did not create an upload session."
                     )
         await set_recording_status(int(match["id"]), "uploading")
+        await append_recording_audit(
+            guild_id, room_id, "youtube_upload_started",
+            detail=f"Preparing {file_size} byte upload.",
+        )
         return web.json_response({"upload_url": upload_url})
 
     async def youtube_upload_complete(self, request: web.Request) -> web.Response:
@@ -372,6 +402,9 @@ class RecorderBridge:
 
         youtube_url = f"https://youtu.be/{video_id}"
         await save_youtube_recording(int(match["id"]), video_id, youtube_url)
+        await append_recording_audit(
+            guild_id, room_id, "youtube_upload_completed", detail=youtube_url
+        )
         channel_id = match["posted_channel_id"]
         message_id = match["posted_message_id"]
         if channel_id and message_id:
@@ -400,8 +433,17 @@ class RecorderBridge:
                             inline=False,
                         )
                     await message.edit(embed=embed)
+                    await append_recording_audit(
+                        guild_id, room_id, "match_history_linked", detail=youtube_url
+                    )
             except Exception as error:
                 print(f"YouTube upload saved, but match embed update failed: {error}")
+                await append_recording_audit(
+                    guild_id,
+                    room_id,
+                    "match_history_link_failed",
+                    detail=str(error),
+                )
         return web.json_response({"ok": True, "youtube_url": youtube_url})
 
     async def lobbies(self, request: web.Request) -> web.Response:

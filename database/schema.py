@@ -221,6 +221,19 @@ CREATE TABLE IF NOT EXISTS recording_integrations (
     PRIMARY KEY (guild_id, provider)
 );
 
+CREATE TABLE IF NOT EXISTS recording_audit_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id TEXT NOT NULL,
+    room_id INTEGER NOT NULL,
+    recorder_id TEXT,
+    stage TEXT NOT NULL,
+    detail TEXT,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS recording_audit_by_room
+ON recording_audit_events(guild_id, room_id, created_at, id);
+
 CREATE TABLE IF NOT EXISTS season_matches (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     community_season_id INTEGER NOT NULL,
