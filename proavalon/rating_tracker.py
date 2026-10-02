@@ -15,6 +15,7 @@ from database.matches import (
     set_recording_status_by_season_match,
 )
 from database.recording_integrations import get_recording_integration
+from database.recording_audit import append_recording_audit
 from database.ratings import (
     get_cached_rating,
     load_rating_cache,
@@ -449,7 +450,38 @@ class ProAvalonRatingTracker:
 
         if str(data.get("phase", "")).casefold() == "finished" and room_id not in self._finalizing:
             self._finalizing.add(room_id)
-            asyncio.create_task(self._finalize_room(room_id))
+            asyncio.create_task(self._finalize_room_guarded(room_id))
+
+    async def _finalize_room_guarded(self, room_id: int) -> None:
+        attempt = 0
+        while room_id in self._tracked:
+            if attempt:
+                self._finalizing.add(room_id)
+            try:
+                await self._finalize_room(room_id)
+                return
+            except Exception as error:
+                attempt += 1
+                delay = min(300, 2 ** min(attempt, 8))
+                print(
+                    f"Could not finalize season match for room {room_id}: "
+                    f"{error!r}. Retrying in {delay} seconds."
+                )
+                state = self._tracked.get(room_id) or {}
+                for season in (state.get("seasons") or {}).values():
+                    try:
+                        await append_recording_audit(
+                            int(season["guild_id"]),
+                            room_id,
+                            "match_finalization_failed",
+                            detail=repr(error),
+                        )
+                    except Exception as audit_error:
+                        print(
+                            f"Could not persist match finalization failure for "
+                            f"room {room_id}: {audit_error!r}"
+                        )
+                await asyncio.sleep(delay)
 
     async def _finalize_room(self, room_id):
         try:
@@ -678,11 +710,25 @@ class ProAvalonRatingTracker:
         configs = await get_enabled_match_configs()
         config = next((c for c in configs if str(c["guild_id"]) == str(season["guild_id"])), None)
         if config is None:
+            await append_recording_audit(
+                int(season["guild_id"]),
+                int(data.get("roomId")),
+                "match_history_not_configured",
+            )
             return
         channel = self.bot.get_channel(int(config["channel_id"]))
         if channel is None:
-            try: channel = await self.bot.fetch_channel(int(config["channel_id"]))
-            except discord.DiscordException: return
+            try:
+                channel = await self.bot.fetch_channel(int(config["channel_id"]))
+            except discord.DiscordException as error:
+                await append_recording_audit(
+                    int(season["guild_id"]),
+                    int(data.get("roomId")),
+                    "match_history_channel_failed",
+                    detail=str(error),
+                )
+                print(f"Could not fetch season match channel: {error}")
+                raise
         winner = str(data.get("winner") or "Unknown")
         winner_key = winner.strip().casefold()
         if winner_key in {"resistance", "res"}:
@@ -1011,5 +1057,18 @@ class ProAvalonRatingTracker:
             await mark_match_posted(
                 int(season["id"]), fingerprint, channel.id, message.id
             )
-        except discord.DiscordException as error:
+            await append_recording_audit(
+                int(season["guild_id"]),
+                int(data.get("roomId")),
+                "match_history_posted",
+                detail=f"Discord message {message.id}.",
+            )
+        except Exception as error:
             print(f"Could not post season match: {error}")
+            await append_recording_audit(
+                int(season["guild_id"]),
+                int(data.get("roomId")),
+                "match_history_post_failed",
+                detail=repr(error),
+            )
+            raise

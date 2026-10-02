@@ -46,14 +46,14 @@ async def save_match(
     game_duration_seconds: float | None = None,
     assassination_duration_seconds: float | None = None,
 ):
-    """Archive a match and return its season-local public match ID, or None if duplicate."""
+    """Archive a match and return its public ID, including an unposted retry."""
     db=await connect()
     try:
         await db.execute("BEGIN IMMEDIATE")
 
         existing = await db.execute(
             """
-            SELECT season_match_id
+            SELECT season_match_id, posted_at
             FROM season_matches
             WHERE community_season_id = ?
               AND match_fingerprint = ?
@@ -64,6 +64,11 @@ async def save_match(
         existing_row = await existing.fetchone()
         if existing_row is not None:
             await db.rollback()
+            # A transient Discord failure may occur after archival but before
+            # the match-history message is posted. Let the tracker retry that
+            # specific pending match without ever reposting a completed one.
+            if existing_row["posted_at"] is None:
+                return int(existing_row["season_match_id"])
             return None
 
         cursor = await db.execute(

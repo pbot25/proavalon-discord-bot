@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import hmac
 import html
+import json
 import os
 import asyncio
 import time
 from datetime import datetime, timezone
+from io import BytesIO
 
 from aiohttp import ClientSession, web
+import discord
 
 from database.discord_roles import get_active_season_linked_users
 from database.seasons import get_active_season, season_display_name
@@ -22,6 +25,7 @@ from database.matches import (
     save_youtube_recording,
     set_recording_status,
 )
+from proavalon.vote_chart import build_vote_history_png
 from youtube_oauth import (
     authorization_url_from_state,
     callback_url,
@@ -449,28 +453,56 @@ class RecorderBridge:
                             value=value,
                             inline=False,
                         )
-                    # Fetched embeds expose an uploaded attachment as its CDN
-                    # URL. Reusing that URL while retaining the attachment
-                    # makes Discord render the same voting chart twice: once
-                    # as a standalone attachment and once inside the embed.
-                    # Restore the attachment:// reference during the edit so
-                    # the existing chart remains embedded exactly once.
-                    chart_attachment = next(
-                        (
+                    # Regenerate the chart from Pbot's archived match instead
+                    # of trying to reuse Discord's old attachment. A fresh,
+                    # room-specific filename avoids Discord resolving the new
+                    # attachment to the attachment being replaced.
+                    def archived_json(column: str, fallback):
+                        raw = match[column]
+                        if raw is None:
+                            return fallback
+                        try:
+                            return json.loads(str(raw))
+                        except (TypeError, ValueError, json.JSONDecodeError):
+                            return fallback
+
+                    chart = build_vote_history_png({
+                        "voteHistory": archived_json("vote_history_json", None),
+                        "playerUsernamesOrdered": archived_json("players_json", []),
+                        "missionHistory": archived_json("mission_history_json", []),
+                        "numFailsHistory": archived_json("fails_history_json", []),
+                        "see": {"roles": archived_json("roles_json", [])},
+                    })
+                    if chart:
+                        chart_filename = f"voting-history-room-{room_id}.png"
+                        chart_file = discord.File(
+                            BytesIO(chart), filename=chart_filename
+                        )
+                        embed.set_image(url=f"attachment://{chart_filename}")
+                        retained_attachments = [
                             attachment
                             for attachment in message.attachments
-                            if attachment.filename == "voting-history.png"
-                        ),
-                        None,
-                    )
-                    if chart_attachment is not None:
-                        embed.set_image(
-                            url=f"attachment://{chart_attachment.filename}"
+                            if not attachment.filename.startswith("voting-history")
+                        ]
+                        edited = await message.edit(
+                            embed=embed,
+                            attachments=[*retained_attachments, chart_file],
                         )
-                    await message.edit(
-                        embed=embed,
-                        attachments=message.attachments,
-                    )
+                        edited_image_url = (
+                            getattr(edited.embeds[0].image, "url", None)
+                            if edited.embeds
+                            else None
+                        )
+                        if not edited_image_url:
+                            raise RuntimeError(
+                                "Discord accepted the YouTube link edit but "
+                                "did not retain the regenerated voting chart."
+                            )
+                    else:
+                        # Matches with disabled/unavailable vote history have
+                        # no chart to preserve.
+                        embed.set_image(url=None)
+                        await message.edit(embed=embed)
                     await append_recording_audit(
                         guild_id, room_id, "match_history_linked", detail=youtube_url
                     )
