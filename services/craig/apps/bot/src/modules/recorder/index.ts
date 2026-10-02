@@ -160,6 +160,16 @@ export default class RecorderModule extends BotModule {
     return { active: true, id: recording.id, channelId: recording.channel.id, state: RecordingState[recording.state] };
   }
 
+  controlledSpeakers(guildID: string) {
+    const recording = this.recordings.get(guildID);
+    if (!recording) return { active: false, speakers: [] };
+    return {
+      active: true,
+      channelId: recording.channel.id,
+      speakers: recording.speakerSnapshot()
+    };
+  }
+
   async stopControlled(guildID: string, discard = false) {
     const recording = this.recordings.get(guildID);
     if (!recording) return { stopped: false };

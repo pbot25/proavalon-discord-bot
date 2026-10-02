@@ -29,6 +29,101 @@ from recording_lifecycle import RecordingLifecycle, SessionState
 SOCKET_URL = "wss://proavalon.com/socket.io/?EIO=4&transport=websocket"
 
 
+class CraigSpeakerOverlay:
+    """Render Craig's live Discord speaker activity inside the captured page."""
+
+    def __init__(self) -> None:
+        enabled = os.getenv("DISCORD_SPEAKER_OVERLAY_ENABLED", "true")
+        self.enabled = enabled.strip().casefold() not in {"0", "false", "no", "off"}
+        self.control_url = os.getenv("CRAIG_CONTROL_URL", "").rstrip("/")
+        self.control_token = os.getenv("CRAIG_CONTROL_TOKEN", "")
+        self.guild_id = os.getenv("DISCORD_GUILD_ID", "").strip()
+        self.session: aiohttp.ClientSession | None = None
+        self.reported_error = False
+
+    async def start(self) -> None:
+        if not self.enabled:
+            return
+        if not self.control_url or not self.control_token or not self.guild_id:
+            print(
+                "Discord speaker overlay disabled: Craig URL, control token, "
+                "or Discord guild ID is missing."
+            )
+            self.enabled = False
+            return
+        self.session = aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=2),
+            headers={"Authorization": f"Bearer {self.control_token}"},
+        )
+
+    async def close(self) -> None:
+        if self.session is not None:
+            await self.session.close()
+            self.session = None
+
+    async def update(self, page) -> None:
+        if not self.enabled or self.session is None:
+            return
+        try:
+            async with self.session.get(
+                f"{self.control_url}/recordings/{self.guild_id}/speakers"
+            ) as response:
+                if response.status != 200:
+                    raise RuntimeError(f"Craig returned HTTP {response.status}")
+                payload = await response.json(content_type=None)
+            speakers = payload.get("speakers") if payload.get("active") else []
+            await page.evaluate(
+                """
+                (speakers) => {
+                  const id = 'proavalon-discord-speaker-overlay';
+                  let overlay = document.getElementById(id);
+                  if (!overlay) {
+                    overlay = document.createElement('div');
+                    overlay.id = id;
+                    Object.assign(overlay.style, {
+                      position: 'fixed', top: '18px', right: '18px', zIndex: '2147483647',
+                      display: 'flex', flexDirection: 'column', alignItems: 'flex-end',
+                      gap: '8px', pointerEvents: 'none', fontFamily: 'Arial, sans-serif'
+                    });
+                    document.documentElement.appendChild(overlay);
+                  }
+                  overlay.replaceChildren();
+                  for (const speaker of speakers || []) {
+                    const row = document.createElement('div');
+                    Object.assign(row.style, {
+                      display: 'flex', alignItems: 'center', gap: '9px',
+                      maxWidth: '310px', padding: '7px 12px 7px 8px',
+                      color: '#ffffff', background: 'rgba(17, 18, 20, 0.90)',
+                      border: '2px solid #23a559', borderRadius: '22px',
+                      boxShadow: '0 2px 10px rgba(0,0,0,.55)',
+                      fontSize: '16px', fontWeight: '700', lineHeight: '24px'
+                    });
+                    const avatar = document.createElement('div');
+                    Object.assign(avatar.style, {
+                      width: '30px', height: '30px', flex: '0 0 30px', borderRadius: '50%',
+                      backgroundColor: '#5865f2', backgroundSize: 'cover',
+                      backgroundPosition: 'center', boxShadow: '0 0 0 2px #23a559'
+                    });
+                    if (speaker.avatarUrl) avatar.style.backgroundImage = `url("${speaker.avatarUrl}")`;
+                    const name = document.createElement('span');
+                    name.textContent = String(speaker.name || 'Discord user');
+                    Object.assign(name.style, { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' });
+                    row.append(avatar, name);
+                    overlay.appendChild(row);
+                  }
+                }
+                """,
+                speakers or [],
+            )
+            if self.reported_error:
+                print("Discord speaker overlay reconnected to Craig.")
+            self.reported_error = False
+        except (aiohttp.ClientError, asyncio.TimeoutError, RuntimeError, ValueError) as error:
+            if not self.reported_error:
+                print(f"Discord speaker overlay temporarily unavailable: {error}")
+            self.reported_error = True
+
+
 class PbotBridgeClient:
     """Read pbot's authenticated live-lobby snapshots from Railway."""
 
@@ -760,6 +855,9 @@ async def record_selected_room(
     game_started_at = None
     replacement = None
     next_bridge_check = 0.0
+    next_speaker_check = 0.0
+    speaker_overlay = CraigSpeakerOverlay()
+    await speaker_overlay.start()
     try:
         if bridge is not None:
             await bridge.audit(room_id, "browser_session_opening")
@@ -828,6 +926,9 @@ async def record_selected_room(
                     ),
                 )
                 now = time.monotonic()
+                if now >= next_speaker_check:
+                    next_speaker_check = now + 0.25
+                    await speaker_overlay.update(page)
                 if (
                     bridge is not None
                     and state in {
@@ -894,6 +995,7 @@ async def record_selected_room(
                 await asyncio.sleep(0.25)
     finally:
         stopped_at = time.monotonic()
+        await speaker_overlay.close()
         try:
             await context.close()
         except PlaywrightError:

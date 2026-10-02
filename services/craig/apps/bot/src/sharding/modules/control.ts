@@ -94,6 +94,13 @@ export default class ControlModule extends ShardManagerModule {
       return shard.eval(`this.recorder.controlledStatus(${JSON.stringify(req.params.guildId)})`);
     });
 
+    this.app.get<{ Params: { guildId: string } }>('/recordings/:guildId/speakers', async (req, reply) => {
+      if (!/^\d+$/.test(req.params.guildId)) return reply.status(400).send({ error: 'Invalid guild ID' });
+      const shard = await this.manager.findGuild(req.params.guildId);
+      if (!shard) return reply.status(404).send({ error: 'Guild not found' });
+      return shard.eval(`this.recorder.controlledSpeakers(${JSON.stringify(req.params.guildId)})`);
+    });
+
     this.app.post<{ Body: { guildId?: string; channelId?: string; postChannelId?: string } }>('/recordings/start', async (req, reply) => {
       const { guildId, channelId, postChannelId } = req.body ?? {};
       if (!guildId || !channelId || !/^\d+$/.test(guildId) || !/^\d+$/.test(channelId) || (postChannelId && !/^\d+$/.test(postChannelId)))

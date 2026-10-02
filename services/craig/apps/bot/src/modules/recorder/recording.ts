@@ -109,6 +109,7 @@ export default class Recording {
 
   users: { [key: string]: RecordingUser } = {};
   userPackets: { [key: string]: Chunk[] } = {};
+  lastPacketAt: { [key: string]: number } = {};
   usersWarned: string[] = [];
   trackNo = 1;
   notePacketNo = 0;
@@ -794,6 +795,7 @@ export default class Recording {
     const time = chunkTime[0] * 48000 + ~~(chunkTime[1] / 20833.333);
     const recordingUser = await this.getOrCreateRecordingUser(userID);
     if (!recordingUser) return;
+    this.lastPacketAt[userID] = Date.now();
 
     // Add packet to list
     if (this.userPackets[userID].length > 0) {
@@ -808,6 +810,17 @@ export default class Recording {
 
     // Set speaking thru webapp
     this.webapp?.userSpeaking(recordingUser.track);
+  }
+
+  speakerSnapshot(activeWindowMs = 750) {
+    const cutoff = Date.now() - activeWindowMs;
+    return Object.values(this.users)
+      .filter((user) => (this.lastPacketAt[user.id] ?? 0) >= cutoff)
+      .map((user) => ({
+        id: user.id,
+        name: user.globalName || user.username,
+        avatarUrl: user.avatarUrl || null
+      }));
   }
 
   note(note?: string) {
