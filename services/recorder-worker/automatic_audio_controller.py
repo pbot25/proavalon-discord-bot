@@ -56,6 +56,13 @@ class Controller:
             0,
             int(float(os.getenv("RECORDER_MIN_FREE_GB", "1")) * 1024**3),
         )
+        self.incomplete_retention_seconds = max(
+            300,
+            int(
+                float(os.getenv("RECORDER_INCOMPLETE_RETENTION_MINUTES", "30"))
+                * 60
+            ),
+        )
         self.next_space_warning_at = 0.0
         self.orphan_retention_seconds = max(
             3600,
@@ -344,6 +351,30 @@ class Controller:
                     await self.audit(room_id, "audio_mix_completed", str(audio_path))
                 video_path = self.matching_video(room_id)
                 if video_path is None:
+                    completed_at = float(metadata.get("completed_at") or time.time())
+                    if time.time() - completed_at >= self.incomplete_retention_seconds:
+                        if metadata.get("delete_key"):
+                            await self.delete_craig_recording(
+                                str(metadata["recording_id"]),
+                                str(metadata["access_key"]),
+                                str(metadata["delete_key"]),
+                            )
+                        self.cleanup_completed_recording(
+                            metadata_path, metadata, reason="incomplete"
+                        )
+                        print(
+                            f"Discarded incomplete room {room_id}: no browser video "
+                            "was produced."
+                        )
+                        await self.audit(
+                            room_id,
+                            "incomplete_media_discarded",
+                            "No browser video was produced.",
+                        )
+                        return
+                    # Do not let a video that is still converting block later
+                    # completed rooms from being inspected.
+                    self.handoff_retry_at[metadata_path] = time.monotonic() + 10
                     return
                 await self.audit(room_id, "final_merge_started")
                 final_path = await asyncio.to_thread(
@@ -408,7 +439,9 @@ class Controller:
         except OSError:
             return 0
 
-    def cleanup_completed_recording(self, metadata_path: Path, metadata: dict) -> None:
+    def cleanup_completed_recording(
+        self, metadata_path: Path, metadata: dict, *, reason: str = "uploaded"
+    ) -> None:
         try:
             room_id = int(metadata["room_id"])
         except (KeyError, TypeError, ValueError):
@@ -423,7 +456,7 @@ class Controller:
         freed = sum(self._safe_unlink(path) for path in paths if str(path))
         freed += self._safe_unlink(metadata_path)
         print(
-            f"Cleaned uploaded room {room_id} media "
+            f"Cleaned {reason} room {room_id} media "
             f"({freed / (1024 * 1024):.1f} MiB freed)."
         )
 

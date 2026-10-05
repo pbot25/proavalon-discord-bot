@@ -30,6 +30,10 @@ SOCKET_URL = "wss://proavalon.com/socket.io/?EIO=4&transport=websocket"
 
 
 def has_recording_capacity(output_dir: Path) -> tuple[bool, float]:
+    # The media directory may have been removed by an operator while clearing
+    # a full Railway volume. Recreate it before asking the filesystem for its
+    # available capacity so the next match can recover without manual setup.
+    output_dir.mkdir(parents=True, exist_ok=True)
     minimum_gb = max(0.0, float(os.getenv("RECORDER_MIN_FREE_GB", "1")))
     free_bytes = shutil.disk_usage(output_dir).free
     return free_bytes >= minimum_gb * 1024**3, free_bytes / 1024**3
