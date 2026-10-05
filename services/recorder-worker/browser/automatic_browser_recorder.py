@@ -29,6 +29,12 @@ from recording_lifecycle import RecordingLifecycle, SessionState
 SOCKET_URL = "wss://proavalon.com/socket.io/?EIO=4&transport=websocket"
 
 
+def has_recording_capacity(output_dir: Path) -> tuple[bool, float]:
+    minimum_gb = max(0.0, float(os.getenv("RECORDER_MIN_FREE_GB", "1")))
+    free_bytes = shutil.disk_usage(output_dir).free
+    return free_bytes >= minimum_gb * 1024**3, free_bytes / 1024**3
+
+
 class CraigSpeakerOverlay:
     """Render Craig's live Discord speaker activity inside the captured page."""
 
@@ -818,6 +824,7 @@ async def record_selected_room(
     original_roster: list[str],
     bridge: PbotBridgeClient | None,
     conversion_tasks: set[asyncio.Task],
+    conversion_lock: asyncio.Lock,
 ):
     output_dir: Path = args.output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -1025,15 +1032,19 @@ async def record_selected_room(
         return False, replacement
 
     duration = max(0.1, stopped_at - game_started_at)
-    conversion_task = asyncio.create_task(finalize_recording(
-        webm_path,
-        mp4_path,
-        trim_start_seconds=max(0.0, game_started_at - capture_started_at),
-        duration_seconds=duration,
-        keep_webm=args.keep_webm,
-        bridge=bridge,
-        room_id=room_id,
-    ))
+    async def convert_in_order():
+        async with conversion_lock:
+            await finalize_recording(
+                webm_path,
+                mp4_path,
+                trim_start_seconds=max(0.0, game_started_at - capture_started_at),
+                duration_seconds=duration,
+                keep_webm=args.keep_webm,
+                bridge=bridge,
+                room_id=room_id,
+            )
+
+    conversion_task = asyncio.create_task(convert_in_order())
     conversion_tasks.add(conversion_task)
     conversion_task.add_done_callback(conversion_tasks.discard)
     print(
@@ -1048,6 +1059,7 @@ async def record_selected_room(
 async def run(args) -> None:
     bridge = None
     conversion_tasks: set[asyncio.Task] = set()
+    conversion_lock = asyncio.Lock()
     if args.bridge_url:
         bridge = PbotBridgeClient(
             args.bridge_url,
@@ -1103,6 +1115,15 @@ async def run(args) -> None:
                     room_release=(bridge.release_room if bridge is not None else None),
                     claim_delay_seconds=args.claim_delay_seconds,
                 )
+                enough_space, free_gb = has_recording_capacity(args.output_dir)
+                if not enough_space:
+                    print(
+                        "Recorder storage is critically low "
+                        f"({free_gb:.2f} GiB free); waiting for pending uploads "
+                        "and cleanup before capturing another game."
+                    )
+                    await asyncio.sleep(30)
+                    continue
                 completed, replacement = await record_selected_room(
                     playwright,
                     watcher,
@@ -1113,6 +1134,7 @@ async def run(args) -> None:
                     roster,
                     bridge,
                     conversion_tasks,
+                    conversion_lock,
                 )
                 retry_delay = 5
             except asyncio.CancelledError:

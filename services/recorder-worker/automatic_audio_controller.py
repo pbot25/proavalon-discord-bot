@@ -48,14 +48,28 @@ class Controller:
         self.session: aiohttp.ClientSession | None = None
         self.active: ActiveRecording | None = None
         self.processing_handoffs: set[Path] = set()
+        self.background_tasks: set[asyncio.Task] = set()
+        self.media_pipeline_lock = asyncio.Lock()
         self.handoff_retry_at: dict[Path, float] = {}
         self.handoff_attempts: dict[Path, int] = {}
+        self.minimum_free_bytes = max(
+            0,
+            int(float(os.getenv("RECORDER_MIN_FREE_GB", "1")) * 1024**3),
+        )
+        self.next_space_warning_at = 0.0
         self.orphan_retention_seconds = max(
             3600,
             int(os.getenv("RECORDER_ORPHAN_RETENTION_HOURS", "24")) * 3600,
         )
         self.next_cleanup_at = 0.0
         self.ssl_context = ssl.create_default_context(cafile=certifi.where())
+
+    def spawn(self, coroutine) -> asyncio.Task:
+        """Keep background work strongly referenced until it finishes."""
+        task = asyncio.create_task(coroutine)
+        self.background_tasks.add(task)
+        task.add_done_callback(self.background_tasks.discard)
+        return task
 
     async def request(self, method: str, url: str, *, bridge=False, **kwargs):
         headers = kwargs.pop("headers", {})
@@ -183,31 +197,23 @@ class Controller:
             await self.audit(current.room_id, "voice_recording_discarded")
             return
         await self.audit(current.room_id, "voice_recording_stopped")
-        asyncio.create_task(self._prepare_audio_handoff(current, result))
+        self.spawn(self._prepare_audio_handoff(current, result))
         print(f"Room {current.room_id} stopped; audio processing continues in the background.")
 
     async def _prepare_audio_handoff(self, current: ActiveRecording, result: dict):
-        try:
-            await self.audit(current.room_id, "audio_mix_started")
-            mixed_path = await self.create_mixed_mp3(
-                result["id"], result["accessKey"], current.room_id
-            )
-        except Exception as error:
-            print(f"Craig mix for room {current.room_id} failed: {error}")
-            await self.audit(current.room_id, "audio_mix_failed", str(error))
-            return
         metadata = {
             "room_id": current.room_id,
             "discord_voice_channel_id": current.channel_id,
             "recording_id": result["id"],
             "access_key": result["accessKey"],
+            "delete_key": result["deleteKey"],
             "completed_at": time.time(),
-            "mixed_mp3": str(mixed_path),
         }
         path = self.output_dir / f"room-{current.room_id}-craig.json"
         path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
-        print(f"Completed room {current.room_id}; saved Craig handoff metadata to {path}.")
-        await self.audit(current.room_id, "audio_mix_completed", str(mixed_path))
+        print(f"Queued completed room {current.room_id} for audio mixing and upload.")
+        self.processing_handoffs.add(path)
+        await self._process_handoff(path)
 
     def matching_video(self, room_id: int) -> Path | None:
         if not self.video_dir.exists():
@@ -281,48 +287,106 @@ class Controller:
         )
         return str(complete["youtube_url"])
 
+    async def delete_craig_recording(
+        self, recording_id: str, access_key: str, delete_key: str
+    ) -> None:
+        """Release Craig's raw source only after YouTube confirms the upload."""
+        assert self.session is not None
+        url = f"{self.ferret_url}/api/v1/recordings/{quote(recording_id)}"
+        async with self.session.delete(
+            url,
+            params={"key": access_key, "delete": delete_key},
+        ) as response:
+            if response.status == 404:
+                return
+            if response.status >= 400:
+                try:
+                    payload = await response.json(content_type=None)
+                except (aiohttp.ContentTypeError, json.JSONDecodeError):
+                    payload = {}
+                raise RuntimeError(
+                    (payload.get("error") if isinstance(payload, dict) else None)
+                    or f"Craig source cleanup failed with HTTP {response.status}"
+                )
+
     async def _process_handoff(self, metadata_path: Path) -> None:
-        room_id = None
-        try:
-            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-            if metadata.get("youtube_url"):
-                if metadata.get("cleanup_after_upload"):
-                    self.cleanup_completed_recording(metadata_path, metadata)
-                return
-            room_id = int(metadata["room_id"])
-            video_path = self.matching_video(room_id)
-            audio_path = Path(metadata["mixed_mp3"])
-            if video_path is None or not audio_path.is_file():
-                return
-            await self.audit(room_id, "final_merge_started")
-            final_path = await asyncio.to_thread(
-                self.combine_recording, video_path, audio_path, room_id
-            )
-            await self.audit(room_id, "final_video_created", str(final_path))
-            youtube_url = await self.upload_to_youtube(final_path, room_id)
-            metadata["final_mp4"] = str(final_path)
-            metadata["youtube_url"] = youtube_url
-            metadata["cleanup_after_upload"] = True
-            metadata_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
-            print(f"Uploaded room {room_id} to YouTube: {youtube_url}")
-            self.cleanup_completed_recording(metadata_path, metadata)
-            await self.audit(room_id, "media_cleanup_completed")
-            self.handoff_retry_at.pop(metadata_path, None)
-            self.handoff_attempts.pop(metadata_path, None)
-        except Exception as error:
-            attempts = self.handoff_attempts.get(metadata_path, 0) + 1
-            self.handoff_attempts[metadata_path] = attempts
-            retry_seconds = min(300, 2 ** min(attempts, 8))
-            self.handoff_retry_at[metadata_path] = time.monotonic() + retry_seconds
-            room_label = str(room_id) if room_id is not None else metadata_path.name
-            print(
-                f"Room {room_label} recording handoff failed: {error}. "
-                f"Retrying in {retry_seconds} seconds."
-            )
-            if room_id is not None:
-                await self.audit(room_id, "handoff_failed", str(error))
-        finally:
-            self.processing_handoffs.discard(metadata_path)
+        async with self.media_pipeline_lock:
+            room_id = None
+            try:
+                metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+                if metadata.get("youtube_url"):
+                    if metadata.get("cleanup_after_upload"):
+                        if metadata.get("delete_key") and not metadata.get("craig_deleted"):
+                            await self.delete_craig_recording(
+                                str(metadata["recording_id"]),
+                                str(metadata["access_key"]),
+                                str(metadata["delete_key"]),
+                            )
+                            metadata["craig_deleted"] = True
+                            metadata_path.write_text(
+                                json.dumps(metadata, indent=2), encoding="utf-8"
+                            )
+                        self.cleanup_completed_recording(metadata_path, metadata)
+                    return
+                room_id = int(metadata["room_id"])
+                audio_path = Path(str(metadata.get("mixed_mp3") or ""))
+                if not audio_path.is_file():
+                    await self.audit(room_id, "audio_mix_started")
+                    audio_path = await self.create_mixed_mp3(
+                        str(metadata["recording_id"]),
+                        str(metadata["access_key"]),
+                        room_id,
+                    )
+                    metadata["mixed_mp3"] = str(audio_path)
+                    metadata_path.write_text(
+                        json.dumps(metadata, indent=2), encoding="utf-8"
+                    )
+                    await self.audit(room_id, "audio_mix_completed", str(audio_path))
+                video_path = self.matching_video(room_id)
+                if video_path is None:
+                    return
+                await self.audit(room_id, "final_merge_started")
+                final_path = await asyncio.to_thread(
+                    self.combine_recording, video_path, audio_path, room_id
+                )
+                await self.audit(room_id, "final_video_created", str(final_path))
+                youtube_url = await self.upload_to_youtube(final_path, room_id)
+                metadata["final_mp4"] = str(final_path)
+                metadata["youtube_url"] = youtube_url
+                metadata["cleanup_after_upload"] = True
+                metadata_path.write_text(
+                    json.dumps(metadata, indent=2), encoding="utf-8"
+                )
+                print(f"Uploaded room {room_id} to YouTube: {youtube_url}")
+                if metadata.get("delete_key"):
+                    await self.delete_craig_recording(
+                        str(metadata["recording_id"]),
+                        str(metadata["access_key"]),
+                        str(metadata["delete_key"]),
+                    )
+                    metadata["craig_deleted"] = True
+                    metadata_path.write_text(
+                        json.dumps(metadata, indent=2), encoding="utf-8"
+                    )
+                    print(f"Deleted Craig source recording for room {room_id}.")
+                self.cleanup_completed_recording(metadata_path, metadata)
+                await self.audit(room_id, "media_cleanup_completed")
+                self.handoff_retry_at.pop(metadata_path, None)
+                self.handoff_attempts.pop(metadata_path, None)
+            except Exception as error:
+                attempts = self.handoff_attempts.get(metadata_path, 0) + 1
+                self.handoff_attempts[metadata_path] = attempts
+                retry_seconds = min(300, 2 ** min(attempts, 8))
+                self.handoff_retry_at[metadata_path] = time.monotonic() + retry_seconds
+                room_label = str(room_id) if room_id is not None else metadata_path.name
+                print(
+                    f"Room {room_label} recording handoff failed: {error}. "
+                    f"Retrying in {retry_seconds} seconds."
+                )
+                if room_id is not None:
+                    await self.audit(room_id, "handoff_failed", str(error))
+            finally:
+                self.processing_handoffs.discard(metadata_path)
 
     def _managed_media_roots(self) -> tuple[Path, ...]:
         return (
@@ -370,7 +434,11 @@ class Controller:
                 metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
             except (OSError, ValueError, json.JSONDecodeError):
                 continue
-            if metadata.get("youtube_url") and metadata.get("cleanup_after_upload"):
+            if (
+                metadata.get("youtube_url")
+                and metadata.get("cleanup_after_upload")
+                and (not metadata.get("delete_key") or metadata.get("craig_deleted"))
+            ):
                 self.cleanup_completed_recording(metadata_path, metadata)
                 continue
             protected.add(metadata_path.resolve())
@@ -415,7 +483,13 @@ class Controller:
 
     def process_handoffs(self) -> None:
         now = time.monotonic()
-        for metadata_path in sorted(self.output_dir.glob("room-*-craig.json")):
+        if self.processing_handoffs:
+            return
+        candidates = sorted(
+            self.output_dir.glob("room-*-craig.json"),
+            key=lambda path: path.stat().st_mtime,
+        )
+        for metadata_path in candidates:
             if metadata_path in self.processing_handoffs:
                 continue
             if now < self.handoff_retry_at.get(metadata_path, 0.0):
@@ -425,11 +499,35 @@ class Controller:
             except (OSError, ValueError, json.JSONDecodeError):
                 continue
             if metadata.get("youtube_url"):
-                if metadata.get("cleanup_after_upload"):
+                if metadata.get("cleanup_after_upload") and (
+                    not metadata.get("delete_key") or metadata.get("craig_deleted")
+                ):
                     self.cleanup_completed_recording(metadata_path, metadata)
-                continue
+                    continue
             self.processing_handoffs.add(metadata_path)
-            asyncio.create_task(self._process_handoff(metadata_path))
+            self.spawn(self._process_handoff(metadata_path))
+            # Strictly process one completed match at a time, oldest first.
+            return
+
+    def has_recording_capacity(self) -> bool:
+        if self.minimum_free_bytes <= 0:
+            return True
+        roots = {self.video_dir, self.output_dir, self.final_dir}
+        try:
+            free_bytes = min(shutil.disk_usage(root).free for root in roots)
+        except OSError:
+            return True
+        if free_bytes >= self.minimum_free_bytes:
+            return True
+        now = time.monotonic()
+        if now >= self.next_space_warning_at:
+            self.next_space_warning_at = now + 60
+            print(
+                "Recorder storage is critically low "
+                f"({free_bytes / (1024**3):.2f} GiB free); prioritizing pending "
+                "uploads before starting another recording."
+            )
+        return False
 
     async def create_mixed_mp3(self, recording_id: str, access_key: str, room_id: int) -> Path:
         job_url = f"{self.ferret_url}/api/v1/recordings/{recording_id}/job?key={access_key}"
@@ -487,7 +585,7 @@ class Controller:
         if self.active is None:
             if config.get("enabled"):
                 candidate = self.candidate(payload)
-                if candidate:
+                if candidate and self.has_recording_capacity():
                     await self.start(candidate, payload)
             return
 
