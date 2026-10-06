@@ -426,6 +426,19 @@ class RecorderBridge:
         await append_recording_audit(
             guild_id, room_id, "youtube_upload_completed", detail=youtube_url
         )
+        # YouTube can finish before the match-history send has committed its
+        # Discord channel/message IDs. Wait briefly for that commit so the
+        # upload-complete request can update the message immediately instead
+        # of leaving it on "Processing" until some later reconciliation.
+        if not match["posted_channel_id"] or not match["posted_message_id"]:
+            for _ in range(40):
+                await asyncio.sleep(0.5)
+                refreshed_match = await get_match_for_recording(guild_id, room_id)
+                if refreshed_match is None:
+                    break
+                match = refreshed_match
+                if match["posted_channel_id"] and match["posted_message_id"]:
+                    break
         channel_id = match["posted_channel_id"]
         message_id = match["posted_message_id"]
         if channel_id and message_id:
@@ -513,6 +526,12 @@ class RecorderBridge:
                     room_id,
                     "match_history_link_failed",
                     detail=str(error),
+                )
+                # Make the recorder retry this idempotent completion callback.
+                # The video and URL are already saved, so no second YouTube
+                # upload is created; only the Discord message edit is retried.
+                raise web.HTTPBadGateway(
+                    text=f"YouTube uploaded, but the match-history link update failed: {error}"
                 )
         return web.json_response({"ok": True, "youtube_url": youtube_url})
 

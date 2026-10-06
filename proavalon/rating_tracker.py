@@ -9,6 +9,7 @@ import discord
 
 from database.matches import (
     get_enabled_match_configs,
+    get_match_for_recording,
     get_previous_player_brackets,
     mark_match_posted,
     save_match,
@@ -1037,14 +1038,31 @@ class ProAvalonRatingTracker:
             embed.add_field(name="Voting History", value="Vote history was disabled for this match.", inline=False)
         youtube = await get_recording_integration(int(season["guild_id"]), "youtube")
         if youtube and youtube["enabled"] and match_id is not None:
+            # The upload may have completed before this Discord message was
+            # ready. Read the archived row again at the last possible moment
+            # so a finished upload is linked on the initial send, rather than
+            # briefly showing a stale processing message.
+            archived_match = await get_match_for_recording(
+                int(season["guild_id"]), int(data.get("roomId"))
+            )
+            youtube_url = (
+                str(archived_match["youtube_url"])
+                if archived_match is not None and archived_match["youtube_url"]
+                else None
+            )
             embed.add_field(
                 name="Recording",
-                value="Processing and uploading to YouTube…",
+                value=(
+                    f"[Watch the full match on YouTube]({youtube_url})"
+                    if youtube_url
+                    else "Processing and uploading to YouTube…"
+                ),
                 inline=False,
             )
-            await set_recording_status_by_season_match(
-                int(season["id"]), match_id, "processing"
-            )
+            if not youtube_url:
+                await set_recording_status_by_season_match(
+                    int(season["id"]), match_id, "processing"
+                )
         embed.set_footer(text=f"Room {data.get('roomId')} • Automatically archived")
         chart = build_vote_history_png(data)
         try:

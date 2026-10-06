@@ -91,8 +91,8 @@ class CraigSpeakerOverlay:
                     overlay = document.createElement('div');
                     overlay.id = id;
                     Object.assign(overlay.style, {
-                      position: 'fixed', top: '18px', right: '18px', zIndex: '2147483647',
-                      display: 'flex', flexDirection: 'column', alignItems: 'flex-end',
+                      position: 'fixed', top: '18px', left: '18px', zIndex: '2147483647',
+                      display: 'flex', flexDirection: 'column', alignItems: 'flex-start',
                       gap: '8px', pointerEvents: 'none', fontFamily: 'Arial, sans-serif'
                     });
                     document.documentElement.appendChild(overlay);
@@ -779,6 +779,7 @@ async def finalize_recording(
     *,
     trim_start_seconds: float,
     duration_seconds: float,
+    game_started_epoch: float,
     keep_webm: bool,
     bridge: PbotBridgeClient | None = None,
     room_id: int | None = None,
@@ -802,6 +803,11 @@ async def finalize_recording(
                 f"{webm_path}."
             )
             return
+        timing_path = mp4_path.with_suffix(".timing.json")
+        timing_path.write_text(
+            json.dumps({"game_started_at": game_started_epoch}),
+            encoding="utf-8",
+        )
         converting_path.replace(mp4_path)
         if not keep_webm:
             webm_path.unlink(missing_ok=True)
@@ -851,6 +857,7 @@ async def record_selected_room(
     )
     await context.add_cookies(cookies)
     capture_started_at = time.monotonic()
+    capture_started_epoch = time.time()
     page = await context.new_page()
     video = page.video
     browser_monitor = BrowserGameMonitor()
@@ -864,6 +871,7 @@ async def record_selected_room(
     successful = False
     ready_at = None
     game_started_at = None
+    game_started_epoch = None
     replacement = None
     next_bridge_check = 0.0
     next_speaker_check = 0.0
@@ -991,6 +999,9 @@ async def record_selected_room(
                     print(f"Recording state: {last_state.value} -> {state.value}")
                     if state is SessionState.RECORDING_GAME:
                         game_started_at = time.monotonic()
+                        game_started_epoch = capture_started_epoch + (
+                            game_started_at - capture_started_at
+                        )
                         print("Retained recording timeline started with the game.")
                         if bridge is not None:
                             await bridge.audit(room_id, "game_recording_started")
@@ -1025,7 +1036,12 @@ async def record_selected_room(
     raw_path = Path(await video.path())
     shutil.move(str(raw_path), str(webm_path))
 
-    if not successful or ready_at is None or game_started_at is None:
+    if (
+        not successful
+        or ready_at is None
+        or game_started_at is None
+        or game_started_epoch is None
+    ):
         webm_path.unlink(missing_ok=True)
         screenshot_path.unlink(missing_ok=True)
         print(f"Discarded {lifecycle.state.value} recording for room {room_id}.")
@@ -1043,6 +1059,7 @@ async def record_selected_room(
                 mp4_path,
                 trim_start_seconds=max(0.0, game_started_at - capture_started_at),
                 duration_seconds=duration,
+                game_started_epoch=game_started_epoch,
                 keep_webm=args.keep_webm,
                 bridge=bridge,
                 room_id=room_id,

@@ -8,6 +8,7 @@ import ssl
 import subprocess
 import time
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote
 
@@ -23,6 +24,7 @@ class ActiveRecording:
     channel_id: int
     recording_id: str
     access_key: str
+    started_at: float
     invalid_since: float | None = None
     postgame_deadline: float | None = None
 
@@ -182,6 +184,11 @@ class Controller:
             channel_id=channel_id,
             recording_id=result["id"],
             access_key=result["accessKey"],
+            started_at=(
+                datetime.fromisoformat(str(result["startedAt"]).replace("Z", "+00:00")).timestamp()
+                if result.get("startedAt")
+                else time.time()
+            ),
         )
         print(f"Recording room {room_id} in Discord voice channel {channel_id}.")
         await self.audit(
@@ -215,6 +222,7 @@ class Controller:
             "access_key": result["accessKey"],
             "delete_key": result["deleteKey"],
             "completed_at": time.time(),
+            "voice_started_at": current.started_at,
         }
         path = self.output_dir / f"room-{current.room_id}-craig.json"
         path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
@@ -232,16 +240,45 @@ class Controller:
         ]
         return max(matches, key=lambda path: path.stat().st_mtime, default=None)
 
-    def combine_recording(self, video_path: Path, audio_path: Path, room_id: int) -> Path:
+    def combine_recording(
+        self,
+        video_path: Path,
+        audio_path: Path,
+        room_id: int,
+        voice_started_at: float | None = None,
+    ) -> Path:
         destination = self.final_dir / f"proavalon-room-{room_id}-complete.mp4"
         if destination.is_file() and destination.stat().st_size > 0:
             return destination
         ffmpeg = shutil.which("ffmpeg")
         if not ffmpeg:
             raise RuntimeError("FFmpeg is not installed or is not available in PATH")
+        timing_path = video_path.with_suffix(".timing.json")
+        audio_offset = 0.0
+        if voice_started_at is not None and timing_path.is_file():
+            try:
+                timing = json.loads(timing_path.read_text(encoding="utf-8"))
+                audio_offset = float(timing["game_started_at"]) - voice_started_at
+                if abs(audio_offset) > 120:
+                    print(
+                        f"Ignoring implausible room {room_id} synchronization "
+                        f"offset {audio_offset:+.3f}s."
+                    )
+                    audio_offset = 0.0
+            except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
+                print(f"Could not read room {room_id} timing metadata: {error}")
+        audio_input = ["-i", str(audio_path)]
+        if audio_offset > 0:
+            audio_input = ["-ss", f"{audio_offset:.3f}", "-i", str(audio_path)]
+        elif audio_offset < 0:
+            audio_input = ["-itsoffset", f"{-audio_offset:.3f}", "-i", str(audio_path)]
+        print(
+            f"Synchronizing room {room_id} Discord audio to browser video "
+            f"(offset {audio_offset:+.3f}s)."
+        )
         subprocess.run(
             [
-                ffmpeg, "-y", "-i", str(video_path), "-i", str(audio_path),
+                ffmpeg, "-y", "-i", str(video_path), *audio_input,
                 "-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy",
                 "-c:a", "aac", "-b:a", "192k", "-shortest", str(destination),
             ],
@@ -261,7 +298,19 @@ class Controller:
             },
         )
         if start.get("already_complete"):
-            return str(start["youtube_url"])
+            youtube_url = str(start["youtube_url"])
+            video_id = youtube_url.rstrip("/").rsplit("/", 1)[-1].split("?", 1)[0]
+            complete = await self.request(
+                "POST",
+                f"{self.bridge_url}/recorder/youtube/uploads/complete",
+                bridge=True,
+                json={
+                    "guild_id": self.guild_id,
+                    "room_id": room_id,
+                    "video_id": video_id,
+                },
+            )
+            return str(complete["youtube_url"])
         upload_url = str(start["upload_url"])
         async with aiohttp.ClientSession(
             timeout=aiohttp.ClientTimeout(total=None),
@@ -378,7 +427,13 @@ class Controller:
                     return
                 await self.audit(room_id, "final_merge_started")
                 final_path = await asyncio.to_thread(
-                    self.combine_recording, video_path, audio_path, room_id
+                    self.combine_recording,
+                    video_path,
+                    audio_path,
+                    room_id,
+                    float(metadata["voice_started_at"])
+                    if metadata.get("voice_started_at") is not None
+                    else None,
                 )
                 await self.audit(room_id, "final_video_created", str(final_path))
                 youtube_url = await self.upload_to_youtube(final_path, room_id)

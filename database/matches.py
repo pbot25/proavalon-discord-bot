@@ -217,7 +217,9 @@ async def set_recording_status(match_database_id:int,status:str):
 async def set_recording_status_by_season_match(season_id:int,match_id:int,status:str):
     db=await connect()
     try:
-        await db.execute("UPDATE season_matches SET recording_status=? WHERE community_season_id=? AND season_match_id=?",(status,season_id,match_id)); await db.commit()
+        # Never replace a completed upload with a stale "processing" state if
+        # YouTube finishes while the match-history embed is being assembled.
+        await db.execute("UPDATE season_matches SET recording_status=? WHERE community_season_id=? AND season_match_id=? AND youtube_url IS NULL",(status,season_id,match_id)); await db.commit()
     finally: await db.close()
 
 async def save_youtube_recording(match_database_id:int,video_id:str,youtube_url:str):
