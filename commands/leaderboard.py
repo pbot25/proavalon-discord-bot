@@ -10,6 +10,10 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 from database.ratings import get_cached_rating
+from database.leaderboard_profiles import (
+    load_profile_snapshots,
+    save_profile_snapshot,
+)
 from database.voting_metrics import get_season_voting_metrics
 from database.seasons import (
     get_active_season,
@@ -38,8 +42,8 @@ from utils.permissions import bot_admin_only
 PAGE_SIZE = 15
 DEFAULT_MINIMUM_GAMES = 5
 
-# Normal /leaderboard requests can only cause a ProAvalon refresh once
-# every two hours per Discord server.
+# Keep a hot in-memory copy for two hours. After that, normal commands reload
+# the persistent database snapshot rather than scraping ProAvalon.
 LEADERBOARD_CACHE_SECONDS = 2 * 60 * 60
 
 # If the daily scheduled post happens right after another refresh, reuse
@@ -1139,6 +1143,7 @@ class LeaderboardCommands(commands.Cog):
             profiles_by_username[
                 profile.username.casefold()
             ] = profile
+            await save_profile_snapshot(profile)
 
         self._cached_profiles[guild_id] = (
             profiles_by_username
@@ -1172,9 +1177,9 @@ class LeaderboardCommands(commands.Cog):
         """
         Return the shared guild leaderboard snapshot.
 
-        Normal commands refresh only when the snapshot is at least two
-        hours old. The per-guild lock is rechecked after acquisition, so
-        simultaneous commands cannot trigger back-to-back scrapes.
+        Normal commands use memory first and then persistent database
+        snapshots. Only an explicit or scheduled refresh scrapes a complete
+        roster once snapshots have been established.
         """
 
         registered_usernames = {
@@ -1190,16 +1195,40 @@ class LeaderboardCommands(commands.Cog):
                 max_age_seconds=LEADERBOARD_CACHE_SECONDS,
             ):
                 return (
-                    list(
-                        self._cached_profiles[
-                            guild_id
-                        ].values()
-                    ),
+                    list(self._cached_profiles[guild_id].values()),
                     0,
-                    self._cache_failed_count.get(
-                        guild_id,
-                        0,
-                    ),
+                    self._cache_failed_count.get(guild_id, 0),
+                    True,
+                )
+
+        # Normal commands are database-first after the small in-memory check.
+        # Persistent snapshots survive
+        # Railway restarts and avoid scraping every ProAvalon profile merely
+        # because somebody opened a leaderboard. Explicit/admin and scheduled
+        # refreshes still take the live scraping path below.
+        if not force_refresh:
+            persisted_profiles, persisted_age = await load_profile_snapshots(
+                registered_usernames
+            )
+            persisted_by_username = {
+                profile.username.casefold(): profile
+                for profile in persisted_profiles
+            }
+            if persisted_by_username:
+                missing_count = len(
+                    registered_usernames.difference(persisted_by_username)
+                )
+                self._cached_profiles[guild_id] = persisted_by_username
+                self._cache_refreshed_at[guild_id] = time.monotonic() - float(
+                    persisted_age or 0
+                )
+                self._cache_season_id[guild_id] = season_id
+                self._cache_registered_usernames[guild_id] = registered_usernames
+                self._cache_failed_count[guild_id] = missing_count
+                return (
+                    list(persisted_by_username.values()),
+                    0,
+                    missing_count,
                     True,
                 )
 
@@ -1531,8 +1560,8 @@ class LeaderboardCommands(commands.Cog):
                 f"Successfully refreshed: {refreshed_count}\n"
                 f"Failed: {failed_count}\n"
                 f"Cached profiles: {len(profiles)}\n"
-                "Normal leaderboard requests will reuse this snapshot "
-                "for up to 2 hours."
+                "Normal leaderboard requests will now reuse these saved "
+                "database snapshots until the next refresh."
             ),
             ephemeral=True,
         )

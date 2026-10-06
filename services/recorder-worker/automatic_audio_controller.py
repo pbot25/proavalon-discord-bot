@@ -8,9 +8,10 @@ import ssl
 import subprocess
 import time
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import quote
+from zoneinfo import ZoneInfo
 
 import aiohttp
 import certifi
@@ -286,17 +287,53 @@ class Controller:
         )
         return destination
 
-    async def upload_to_youtube(self, final_path: Path, room_id: int) -> str:
-        start = await self.request(
-            "POST",
-            f"{self.bridge_url}/recorder/youtube/uploads/start",
-            bridge=True,
-            json={
-                "guild_id": self.guild_id,
-                "room_id": room_id,
-                "file_size": final_path.stat().st_size,
-            },
+    @staticmethod
+    def youtube_quota_reset_delay() -> int:
+        """Seconds until shortly after YouTube's next midnight-Pacific reset."""
+        now = datetime.now(ZoneInfo("America/Los_Angeles"))
+        reset = (now + timedelta(days=1)).replace(
+            hour=0, minute=5, second=0, microsecond=0
         )
+        return max(300, int((reset - now).total_seconds()))
+
+    async def upload_to_youtube(
+        self,
+        final_path: Path,
+        room_id: int,
+        metadata: dict,
+        metadata_path: Path,
+    ) -> str:
+        # Persist the resumable session before transferring any bytes. A
+        # container restart or transient network failure can then resume the
+        # same YouTube upload instead of consuming another videos.insert call.
+        upload_url = str(metadata.get("youtube_upload_url") or "")
+        video_id = str(metadata.get("youtube_video_id") or "")
+        if video_id:
+            complete = await self.request(
+                "POST",
+                f"{self.bridge_url}/recorder/youtube/uploads/complete",
+                bridge=True,
+                json={
+                    "guild_id": self.guild_id,
+                    "room_id": room_id,
+                    "video_id": video_id,
+                },
+            )
+            return str(complete["youtube_url"])
+
+        if not upload_url:
+            start = await self.request(
+                "POST",
+                f"{self.bridge_url}/recorder/youtube/uploads/start",
+                bridge=True,
+                json={
+                    "guild_id": self.guild_id,
+                    "room_id": room_id,
+                    "file_size": final_path.stat().st_size,
+                },
+            )
+        else:
+            start = {"upload_url": upload_url}
         if start.get("already_complete"):
             youtube_url = str(start["youtube_url"])
             video_id = youtube_url.rstrip("/").rsplit("/", 1)[-1].split("?", 1)[0]
@@ -312,6 +349,11 @@ class Controller:
             )
             return str(complete["youtube_url"])
         upload_url = str(start["upload_url"])
+        if metadata.get("youtube_upload_url") != upload_url:
+            metadata["youtube_upload_url"] = upload_url
+            metadata_path.write_text(
+                json.dumps(metadata, indent=2), encoding="utf-8"
+            )
         async with aiohttp.ClientSession(
             timeout=aiohttp.ClientTimeout(total=None),
             connector=aiohttp.TCPConnector(ssl=self.ssl_context),
@@ -327,10 +369,18 @@ class Controller:
                 ) as response:
                     result = await response.json(content_type=None)
                     if response.status not in {200, 201} or not result.get("id"):
+                        if response.status in {404, 410}:
+                            metadata.pop("youtube_upload_url", None)
+                            metadata_path.write_text(
+                                json.dumps(metadata, indent=2), encoding="utf-8"
+                            )
                         raise RuntimeError(
                             result.get("error", {}).get("message")
                             or f"YouTube upload failed with HTTP {response.status}"
                         )
+        video_id = str(result["id"])
+        metadata["youtube_video_id"] = video_id
+        metadata_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
         complete = await self.request(
             "POST",
             f"{self.bridge_url}/recorder/youtube/uploads/complete",
@@ -338,7 +388,7 @@ class Controller:
             json={
                 "guild_id": self.guild_id,
                 "room_id": room_id,
-                "video_id": result["id"],
+                "video_id": video_id,
             },
         )
         return str(complete["youtube_url"])
@@ -436,7 +486,9 @@ class Controller:
                     else None,
                 )
                 await self.audit(room_id, "final_video_created", str(final_path))
-                youtube_url = await self.upload_to_youtube(final_path, room_id)
+                youtube_url = await self.upload_to_youtube(
+                    final_path, room_id, metadata, metadata_path
+                )
                 metadata["final_mp4"] = str(final_path)
                 metadata["youtube_url"] = youtube_url
                 metadata["cleanup_after_upload"] = True
@@ -462,12 +514,27 @@ class Controller:
             except Exception as error:
                 attempts = self.handoff_attempts.get(metadata_path, 0) + 1
                 self.handoff_attempts[metadata_path] = attempts
-                retry_seconds = min(300, 2 ** min(attempts, 8))
+                error_text = str(error)
+                quota_exhausted = (
+                    "HTTP 429" in error_text
+                    and "Video Uploads" in error_text
+                    and "Quota exceeded" in error_text
+                )
+                retry_seconds = (
+                    self.youtube_quota_reset_delay()
+                    if quota_exhausted
+                    else min(300, 2 ** min(attempts, 8))
+                )
                 self.handoff_retry_at[metadata_path] = time.monotonic() + retry_seconds
                 room_label = str(room_id) if room_id is not None else metadata_path.name
                 print(
                     f"Room {room_label} recording handoff failed: {error}. "
-                    f"Retrying in {retry_seconds} seconds."
+                    + (
+                        "YouTube's daily upload quota is exhausted; retrying "
+                        "shortly after the next midnight-Pacific reset."
+                        if quota_exhausted
+                        else f"Retrying in {retry_seconds} seconds."
+                    )
                 )
                 if room_id is not None:
                     await self.audit(room_id, "handoff_failed", str(error))

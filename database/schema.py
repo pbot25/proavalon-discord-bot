@@ -272,6 +272,17 @@ CREATE INDEX IF NOT EXISTS proavalon_ratings_updated
 ON proavalon_ratings(rating_updated_at);
 
 
+CREATE TABLE IF NOT EXISTS proavalon_profile_snapshots (
+    username_key TEXT PRIMARY KEY,
+    username TEXT NOT NULL,
+    profile_json TEXT NOT NULL,
+    fetched_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS proavalon_profile_snapshots_fetched
+ON proavalon_profile_snapshots(fetched_at);
+
+
 CREATE TABLE IF NOT EXISTS command_channel_configs (
     guild_id TEXT PRIMARY KEY,
     channel_id TEXT NOT NULL,
