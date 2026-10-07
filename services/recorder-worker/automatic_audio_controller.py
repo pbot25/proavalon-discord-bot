@@ -418,6 +418,7 @@ class Controller:
     async def _process_handoff(self, metadata_path: Path) -> None:
         async with self.media_pipeline_lock:
             room_id = None
+            metadata: dict = {}
             try:
                 metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
                 if metadata.get("youtube_url"):
@@ -520,21 +521,41 @@ class Controller:
                     and "Video Uploads" in error_text
                     and "Quota exceeded" in error_text
                 )
-                retry_seconds = (
-                    self.youtube_quota_reset_delay()
-                    if quota_exhausted
-                    else min(300, 2 ** min(attempts, 8))
+                channel_upload_limited = (
+                    "HTTP 400" in error_text
+                    and "user has exceeded the number of videos"
+                    in error_text.casefold()
                 )
+                if quota_exhausted:
+                    retry_seconds = self.youtube_quota_reset_delay()
+                    retry_message = (
+                        "YouTube's daily upload quota is exhausted; retrying "
+                        "shortly after the next midnight-Pacific reset."
+                    )
+                elif channel_upload_limited:
+                    retry_seconds = 24 * 60 * 60
+                    retry_message = (
+                        "The YouTube channel's daily upload limit is exhausted; "
+                        "retrying in 24 hours."
+                    )
+                else:
+                    retry_seconds = min(300, 2 ** min(attempts, 8))
+                    retry_message = f"Retrying in {retry_seconds} seconds."
                 self.handoff_retry_at[metadata_path] = time.monotonic() + retry_seconds
+                if quota_exhausted or channel_upload_limited:
+                    metadata["youtube_retry_after"] = time.time() + retry_seconds
+                    metadata["youtube_retry_reason"] = (
+                        "api_daily_quota"
+                        if quota_exhausted
+                        else "channel_daily_upload_limit"
+                    )
+                    metadata_path.write_text(
+                        json.dumps(metadata, indent=2), encoding="utf-8"
+                    )
                 room_label = str(room_id) if room_id is not None else metadata_path.name
                 print(
                     f"Room {room_label} recording handoff failed: {error}. "
-                    + (
-                        "YouTube's daily upload quota is exhausted; retrying "
-                        "shortly after the next midnight-Pacific reset."
-                        if quota_exhausted
-                        else f"Retrying in {retry_seconds} seconds."
-                    )
+                    + retry_message
                 )
                 if room_id is not None:
                     await self.audit(room_id, "handoff_failed", str(error))
@@ -652,6 +673,18 @@ class Controller:
             try:
                 metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
             except (OSError, ValueError, json.JSONDecodeError):
+                continue
+            try:
+                persistent_retry_after = float(
+                    metadata.get("youtube_retry_after") or 0
+                )
+            except (TypeError, ValueError):
+                persistent_retry_after = 0
+            persistent_wait = persistent_retry_after - time.time()
+            if persistent_wait > 0:
+                self.handoff_retry_at[metadata_path] = (
+                    time.monotonic() + persistent_wait
+                )
                 continue
             if metadata.get("youtube_url"):
                 if metadata.get("cleanup_after_upload") and (
