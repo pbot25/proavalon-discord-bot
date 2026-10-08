@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import json
+import math
+import re
 import discord
 from discord import app_commands
 from discord.ext import commands
-from database.insights import active_or_latest,season_rows,recent_rows,find_match,registered_usernames,all_links_for_discord,bot_status_data,unpack,player_summary,streak_summary,role_summary,alignment_summary,role_board,activity_summary,season_records,ratings_for_usernames,relationships
+from database.insights import active_or_latest,season_rows,recent_rows,find_match,registered_usernames,all_links_for_discord,bot_status_data,unpack,player_summary,streak_summary,role_summary,alignment_summary,role_board,activity_summary,season_records,ratings_for_usernames,relationships,season_match_player_names,search_matches_by_players
 from utils.permissions import bot_admin_only
 from database.account_links import get_preferred_link_for_discord
 from utils.discord_users import parse_discord_user_id
@@ -25,6 +27,115 @@ async def player_auto(interaction,current):
     if not s: return []
     vals=await registered_usernames(s['id']); q=current.casefold()
     return [app_commands.Choice(name=v,value=v) for v in vals if q in v.casefold()][:25]
+
+MATCH_SEARCH_PAGE_SIZE = 3
+DISCORD_MENTION_RE = re.compile(r"^<@!?(\d+)>$")
+
+
+def _compact_match_value(row) -> str:
+    participants = unpack(row)
+    resistance = [p["username"] for p in participants if p["alignment"] == "Resistance"]
+    spies = [p["username"] for p in participants if p["alignment"] == "Spy"]
+    unknown = [p["username"] for p in participants if p["alignment"] is None]
+
+    lines = [
+        f"**Res:** {', '.join(f'`{name}`' for name in resistance) or 'N/A'}",
+        f"**Spy:** {', '.join(f'`{name}`' for name in spies) or 'N/A'}",
+    ]
+    if unknown:
+        lines.append(f"**Other:** {', '.join(f'`{name}`' for name in unknown)}")
+    if row["youtube_url"]:
+        lines.append(f"[YouTube]({row['youtube_url']})")
+    return "\n".join(lines)
+
+
+class MatchSearchView(discord.ui.View):
+    def __init__(self, *, rows, season, searched_names, requesting_user_id: int):
+        super().__init__(timeout=180)
+        self.rows = list(rows)
+        self.season = season
+        self.searched_names = searched_names
+        self.requesting_user_id = requesting_user_id
+        self.page = 0
+        self.total_pages = max(1, math.ceil(len(self.rows) / MATCH_SEARCH_PAGE_SIZE))
+        self._update_buttons()
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id == self.requesting_user_id:
+            return True
+        await interaction.response.send_message(
+            "Only the person who opened this search can change pages.",
+            ephemeral=True,
+        )
+        return False
+
+    def _update_buttons(self) -> None:
+        self.previous_button.disabled = self.page == 0
+        self.next_button.disabled = self.page >= self.total_pages - 1
+
+    def build_embed(self) -> discord.Embed:
+        start = self.page * MATCH_SEARCH_PAGE_SIZE
+        page_rows = self.rows[start:start + MATCH_SEARCH_PAGE_SIZE]
+        embed = discord.Embed(
+            title=f"{season_display_name(self.season)} — Match Search",
+            description=(
+                f"**Players:** {', '.join(f'`{name}`' for name in self.searched_names)}\n"
+                f"**{len(self.rows)} matching match{'es' if len(self.rows) != 1 else ''}**"
+            ),
+            color=discord.Color.blurple(),
+        )
+        for row in page_rows:
+            winner = str(row["winner"] or "Unknown")
+            embed.add_field(
+                name=(
+                    f"#{row['season_match_id']} • {winner} win • "
+                    f"{fmt_date(row['finished_at'])}"
+                ),
+                value=_compact_match_value(row),
+                inline=False,
+            )
+        embed.set_footer(text=f"Page {self.page + 1}/{self.total_pages}")
+        return embed
+
+    @discord.ui.button(label="Previous", emoji="◀️", style=discord.ButtonStyle.secondary)
+    async def previous_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.page > 0:
+            self.page -= 1
+        self._update_buttons()
+        await interaction.response.edit_message(embed=self.build_embed(), view=self)
+
+    @discord.ui.button(label="Next", emoji="▶️", style=discord.ButtonStyle.secondary)
+    async def next_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.page < self.total_pages - 1:
+            self.page += 1
+        self._update_buttons()
+        await interaction.response.edit_message(embed=self.build_embed(), view=self)
+
+    async def on_timeout(self) -> None:
+        for child in self.children:
+            child.disabled = True
+
+
+async def match_search_autocomplete(interaction: discord.Interaction, current: str):
+    if interaction.guild_id is None:
+        return []
+    season = await active_or_latest(interaction.guild_id)
+    if not season:
+        return []
+    names = await season_match_player_names(int(season["id"]))
+    parts = current.split(",")
+    prefix = ", ".join(part.strip() for part in parts[:-1] if part.strip())
+    query = parts[-1].strip().casefold()
+    choices = []
+    for name in names:
+        if query not in name.casefold():
+            continue
+        value = f"{prefix}, {name}" if prefix else name
+        if len(value) <= 600:
+            choices.append(app_commands.Choice(name=name, value=value))
+        if len(choices) == 25:
+            break
+    return choices
 
 async def resolve_name(
     interaction,
@@ -81,6 +192,93 @@ class Insights(commands.Cog):
             recording=(f"\n[Watch recording]({r['youtube_url']})" if r['youtube_url'] else "")
             e.add_field(name=f"Match #{r['season_match_id']} • {fmt_date(r['finished_at'])}",value=f"**{r['winner'] or 'Unknown'} Victory**\n"+', '.join(players)+recording,inline=False)
         await interaction.response.send_message(embed=e)
+
+    @app_commands.command(
+        name="match-search",
+        description="Finds archived matches containing all supplied players.",
+    )
+    @app_commands.describe(
+        players="One to ten usernames or Discord @mentions, separated by commas.",
+    )
+    @app_commands.autocomplete(players=match_search_autocomplete)
+    async def match_search(
+        self,
+        interaction: discord.Interaction,
+        players: app_commands.Range[str, 1, 600],
+    ):
+        if interaction.guild_id is None:
+            return await interaction.response.send_message(
+                "This command can only be used in a server.", ephemeral=True
+            )
+
+        raw_entries = [entry.strip() for entry in players.split(",") if entry.strip()]
+        if not raw_entries:
+            return await interaction.response.send_message(
+                "Enter at least one username or Discord @mention.", ephemeral=True
+            )
+        if len(raw_entries) > 10:
+            return await interaction.response.send_message(
+                "You can search for at most 10 players at once.", ephemeral=True
+            )
+
+        season = await active_or_latest(interaction.guild_id)
+        if not season:
+            return await interaction.response.send_message(
+                "No season history exists.", ephemeral=True
+            )
+
+        await interaction.response.defer(thinking=True)
+        archived_names = await season_match_player_names(int(season["id"]))
+        canonical = {name.casefold(): name for name in archived_names}
+        resolved = []
+        unresolved = []
+
+        for entry in raw_entries:
+            mention = DISCORD_MENTION_RE.fullmatch(entry)
+            if mention:
+                link = await get_preferred_link_for_discord(
+                    interaction.guild_id,
+                    int(mention.group(1)),
+                    int(season["season_number"]),
+                )
+                if link is None:
+                    unresolved.append(entry)
+                    continue
+                requested = str(link["proavalon_username"]).strip()
+            else:
+                requested = entry
+
+            name = canonical.get(requested.casefold())
+            if name is None:
+                unresolved.append(entry)
+            elif name.casefold() not in {item.casefold() for item in resolved}:
+                resolved.append(name)
+
+        if unresolved:
+            return await interaction.followup.send(
+                "I couldn't find an archived player for: "
+                + ", ".join(f"`{item}`" for item in unresolved)
+                + ". Mentions must be linked to a ProAvalon account for this season.",
+                ephemeral=True,
+            )
+        if not resolved:
+            return await interaction.followup.send(
+                "No valid players were supplied.", ephemeral=True
+            )
+
+        rows = await search_matches_by_players(int(season["id"]), resolved)
+        if not rows:
+            return await interaction.followup.send(
+                "No archived matches contain every supplied player.", ephemeral=True
+            )
+
+        view = MatchSearchView(
+            rows=rows,
+            season=season,
+            searched_names=resolved,
+            requesting_user_id=interaction.user.id,
+        )
+        await interaction.followup.send(embed=view.build_embed(), view=view)
 
     @app_commands.command(name='match',description='Shows one archived match by its season match ID.')
     async def match(self,interaction:discord.Interaction,match_id:int):

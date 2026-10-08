@@ -48,6 +48,54 @@ async def recent_rows(season_id:int, limit:int):
         return await cur.fetchall()
     finally: await db.close()
 
+async def season_match_player_names(season_id: int) -> list[str]:
+    """Return the distinct archived player names for a season."""
+    db = await connect()
+    try:
+        cur = await db.execute(
+            """
+            SELECT MIN(CAST(player.value AS TEXT)) AS username
+            FROM season_matches AS sm
+            JOIN json_each(sm.players_json) AS player
+            WHERE sm.community_season_id = ?
+              AND TRIM(CAST(player.value AS TEXT)) <> ''
+            GROUP BY LOWER(TRIM(CAST(player.value AS TEXT)))
+            ORDER BY username COLLATE NOCASE
+            """,
+            (season_id,),
+        )
+        return [str(row["username"]) for row in await cur.fetchall()]
+    finally:
+        await db.close()
+
+async def search_matches_by_players(season_id: int, usernames: list[str]):
+    """Find newest matches containing every supplied player name."""
+    keys = list(dict.fromkeys(
+        name.strip().casefold() for name in usernames if name.strip()
+    ))
+    if not keys:
+        return []
+
+    placeholders = ",".join("?" for _ in keys)
+    db = await connect()
+    try:
+        cur = await db.execute(
+            f"""
+            SELECT sm.*
+            FROM season_matches AS sm
+            JOIN json_each(sm.players_json) AS player
+            WHERE sm.community_season_id = ?
+              AND LOWER(TRIM(CAST(player.value AS TEXT))) IN ({placeholders})
+            GROUP BY sm.id
+            HAVING COUNT(DISTINCT LOWER(TRIM(CAST(player.value AS TEXT)))) = ?
+            ORDER BY sm.finished_at DESC, sm.id DESC
+            """,
+            (season_id, *keys, len(keys)),
+        )
+        return await cur.fetchall()
+    finally:
+        await db.close()
+
 async def find_match(season_id:int, match_id:int):
     """Find a match only by its season-local public match ID."""
     db=await connect()
