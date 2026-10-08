@@ -28,7 +28,7 @@ async def player_auto(interaction,current):
     vals=await registered_usernames(s['id']); q=current.casefold()
     return [app_commands.Choice(name=v,value=v) for v in vals if q in v.casefold()][:25]
 
-MATCH_SEARCH_PAGE_SIZE = 3
+MATCH_SEARCH_PAGE_SIZE = 5
 DISCORD_MENTION_RE = re.compile(r"^<@!?(\d+)>$")
 
 
