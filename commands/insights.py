@@ -7,7 +7,7 @@ import re
 import discord
 from discord import app_commands
 from discord.ext import commands
-from database.insights import active_or_latest,season_rows,recent_rows,find_match,registered_usernames,all_links_for_discord,bot_status_data,unpack,player_summary,streak_summary,role_summary,alignment_summary,role_board,activity_summary,season_records,ratings_for_usernames,relationships,season_match_player_names,search_matches_by_players
+from database.insights import active_or_latest,season_rows,recent_rows,find_match,registered_usernames,all_links_for_discord,bot_status_data,unpack,player_summary,streak_summary,role_summary,alignment_summary,role_board,activity_summary,season_records,ratings_for_usernames,relationships,season_match_player_names,season_player_discord_links,search_matches_by_players
 from utils.permissions import bot_admin_only
 from database.account_links import get_preferred_link_for_discord
 from utils.discord_users import parse_discord_user_id
@@ -123,16 +123,36 @@ async def match_search_autocomplete(interaction: discord.Interaction, current: s
     if not season:
         return []
     names = await season_match_player_names(int(season["id"]))
-    parts = current.split(",")
-    prefix = ", ".join(part.strip() for part in parts[:-1] if part.strip())
-    query = parts[-1].strip().casefold()
+    linked_rows = await season_player_discord_links(int(season["id"]))
+    linked_ids = {
+        str(row["proavalon_username"]).casefold(): row["discord_user_id"]
+        for row in linked_rows
+        if row["discord_user_id"]
+    }
+    selected = {
+        str(getattr(interaction.namespace, f"player_{index}", "") or "")
+        .strip()
+        .casefold()
+        for index in range(1, 11)
+    }
+    query = current.strip().lstrip("@").casefold()
     choices = []
     for name in names:
-        if query not in name.casefold():
+        key = name.casefold()
+        if key in selected and key != current.strip().casefold():
             continue
-        value = f"{prefix}, {name}" if prefix else name
-        if len(value) <= 600:
-            choices.append(app_commands.Choice(name=name, value=value))
+        member = None
+        discord_id = linked_ids.get(key)
+        if discord_id and interaction.guild is not None:
+            member = interaction.guild.get_member(int(discord_id))
+        discord_terms = ""
+        choice_name = name
+        if member is not None:
+            discord_terms = f"{member.name} {member.display_name}".casefold()
+            choice_name = f"{name} — @{member.display_name}"
+        if query and query not in key and query not in discord_terms:
+            continue
+        choices.append(app_commands.Choice(name=choice_name[:100], value=name))
         if len(choices) == 25:
             break
     return choices
@@ -198,28 +218,56 @@ class Insights(commands.Cog):
         description="Finds archived matches containing all supplied players.",
     )
     @app_commands.describe(
-        players="One to ten usernames or Discord @mentions, separated by commas.",
+        player_1="First player (required).",
+        player_2="Second player.",
+        player_3="Third player.",
+        player_4="Fourth player.",
+        player_5="Fifth player.",
+        player_6="Sixth player.",
+        player_7="Seventh player.",
+        player_8="Eighth player.",
+        player_9="Ninth player.",
+        player_10="Tenth player.",
     )
-    @app_commands.autocomplete(players=match_search_autocomplete)
+    @app_commands.autocomplete(
+        player_1=match_search_autocomplete,
+        player_2=match_search_autocomplete,
+        player_3=match_search_autocomplete,
+        player_4=match_search_autocomplete,
+        player_5=match_search_autocomplete,
+        player_6=match_search_autocomplete,
+        player_7=match_search_autocomplete,
+        player_8=match_search_autocomplete,
+        player_9=match_search_autocomplete,
+        player_10=match_search_autocomplete,
+    )
     async def match_search(
         self,
         interaction: discord.Interaction,
-        players: app_commands.Range[str, 1, 600],
+        player_1: app_commands.Range[str, 1, 100],
+        player_2: app_commands.Range[str, 1, 100] | None = None,
+        player_3: app_commands.Range[str, 1, 100] | None = None,
+        player_4: app_commands.Range[str, 1, 100] | None = None,
+        player_5: app_commands.Range[str, 1, 100] | None = None,
+        player_6: app_commands.Range[str, 1, 100] | None = None,
+        player_7: app_commands.Range[str, 1, 100] | None = None,
+        player_8: app_commands.Range[str, 1, 100] | None = None,
+        player_9: app_commands.Range[str, 1, 100] | None = None,
+        player_10: app_commands.Range[str, 1, 100] | None = None,
     ):
         if interaction.guild_id is None:
             return await interaction.response.send_message(
                 "This command can only be used in a server.", ephemeral=True
             )
 
-        raw_entries = [entry.strip() for entry in players.split(",") if entry.strip()]
-        if not raw_entries:
-            return await interaction.response.send_message(
-                "Enter at least one username or Discord @mention.", ephemeral=True
+        raw_entries = [
+            entry.strip()
+            for entry in (
+                player_1, player_2, player_3, player_4, player_5,
+                player_6, player_7, player_8, player_9, player_10,
             )
-        if len(raw_entries) > 10:
-            return await interaction.response.send_message(
-                "You can search for at most 10 players at once.", ephemeral=True
-            )
+            if entry and entry.strip()
+        ]
 
         season = await active_or_latest(interaction.guild_id)
         if not season:

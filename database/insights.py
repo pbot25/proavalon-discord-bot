@@ -68,6 +68,26 @@ async def season_match_player_names(season_id: int) -> list[str]:
     finally:
         await db.close()
 
+async def season_player_discord_links(season_id: int):
+    """Return active Discord links scoped to the selected season."""
+    db = await connect()
+    try:
+        cur = await db.execute(
+            """
+            SELECT links.proavalon_username, links.discord_user_id
+            FROM account_links AS links
+            JOIN community_seasons AS season
+              ON season.guild_id = links.guild_id
+             AND season.season_number = links.season_number
+            WHERE season.id = ?
+              AND links.is_active = 1
+            """,
+            (season_id,),
+        )
+        return await cur.fetchall()
+    finally:
+        await db.close()
+
 async def search_matches_by_players(season_id: int, usernames: list[str]):
     """Find newest matches containing every supplied player name."""
     keys = list(dict.fromkeys(
