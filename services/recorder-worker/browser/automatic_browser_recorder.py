@@ -278,6 +278,24 @@ class PbotBridgeClient:
                 and all(name.casefold().startswith(prefix) for name in players)
                 and len(overlap) >= minimum_overlap
             ):
+                # Reserve the handoff target before closing the current
+                # browser. Without this claim, another recorder can take the
+                # room—or the room can start—during re-authentication.
+                try:
+                    if not await self.claim_room(room_id):
+                        continue
+                except (
+                    aiohttp.ClientError,
+                    asyncio.TimeoutError,
+                    RuntimeError,
+                    ValueError,
+                ):
+                    return None
+                await self.audit(
+                    room_id,
+                    "replacement_room_reserved",
+                    f"Reserved while handing off from room {old_room_id}.",
+                )
                 return {
                     "room_id": room_id,
                     "players": players,
@@ -441,6 +459,7 @@ class LobbyWatcher:
             if preferred_room_id is not None:
                 games.sort(key=lambda item: item[0] != preferred_room_id)
             for room_id, game in games:
+                is_preferred = room_id == preferred_room_id
                 try:
                     count = int(game.get("numOfPlayersInside", 0))
                     maximum = int(game.get("maxNumPlayers", 0))
@@ -453,12 +472,13 @@ class LobbyWatcher:
                 if (
                     maximum != 10
                     or game.get("passwordLocked", False)
-                    or status in {"game in progress", "finished"}
+                    or status == "finished"
+                    or (status == "game in progress" and not is_preferred)
                     or room_id in inspected
                 ):
                     continue
                 if room_claim is not None:
-                    if claim_delay_pending:
+                    if claim_delay_pending and not is_preferred:
                         await asyncio.sleep(claim_delay_pending)
                         claim_delay_pending = 0
                     if not await room_claim(room_id):
@@ -470,6 +490,11 @@ class LobbyWatcher:
                     name.casefold().startswith(normalized_prefix)
                     for name in roster
                 ):
+                    if status == "game in progress" and is_preferred:
+                        print(
+                            f"Reserved replacement room {room_id} started during "
+                            "handoff; joining the game already in progress."
+                        )
                     print(
                         f"Room {room_id} reached ten qualifying players: "
                         + ", ".join(roster)
