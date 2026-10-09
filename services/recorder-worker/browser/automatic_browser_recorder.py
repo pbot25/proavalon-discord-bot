@@ -975,11 +975,10 @@ async def record_selected_room(
                     await speaker_overlay.update(page)
                 if (
                     bridge is not None
-                    and state in {
-                        SessionState.RECORDING_PREGAME,
-                        SessionState.RECORDING_GAME,
-                        SessionState.POSTGAME,
-                    }
+                    # Never abandon a live game merely because another lobby
+                    # contains some of the same players. Replacement handoff
+                    # is safe only after the selected room is confirmed done.
+                    and state is SessionState.POSTGAME
                     and now >= next_bridge_check
                 ):
                     next_bridge_check = now + 1.0
@@ -1002,23 +1001,16 @@ async def record_selected_room(
                             f"Replacement lobby {replacement['room_id']} detected "
                             f"with {len(replacement['overlap'])} returning players: {names}"
                         )
-                        if state is SessionState.POSTGAME:
-                            # The match is already valid and must never be
-                            # discarded merely because its players quickly
-                            # formed another lobby. End only the optional
-                            # postgame tail, save this match, then hand off.
-                            lifecycle.state = SessionState.COMPLETED
-                            successful = True
-                            print(
-                                "Ending postgame early, saving the completed "
-                                "game, and handing off immediately."
-                            )
-                        else:
-                            lifecycle.state = SessionState.ABANDONED
-                            print(
-                                "Discarding the unfinished old game and "
-                                "handing off immediately."
-                            )
+                        # The match is already valid and must never be
+                        # discarded merely because its players quickly
+                        # formed another lobby. End only the optional
+                        # postgame tail, save this match, then hand off.
+                        lifecycle.state = SessionState.COMPLETED
+                        successful = True
+                        print(
+                            "Ending postgame early, saving the completed "
+                            "game, and handing off immediately."
+                        )
                         state = lifecycle.state
                 if state is not last_state:
                     print(f"Recording state: {last_state.value} -> {state.value}")

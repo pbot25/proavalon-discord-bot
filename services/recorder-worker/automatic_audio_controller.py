@@ -778,14 +778,6 @@ class Controller:
             return
 
         current = self.active
-        replacement = self.candidate(payload, exclude_room=current.room_id)
-        if replacement:
-            returning = len({p.casefold() for p in current.players}.intersection(p.casefold() for p in replacement[2]))
-            if returning >= 3:
-                await self.stop(discard=current.postgame_deadline is None)
-                await self.start(replacement, payload)
-                return
-
         lobby = next((item for item in payload.get("lobbies") or [] if int(item.get("room_id", -1)) == current.room_id), None)
         now = time.monotonic()
         status = str((lobby or {}).get("status") or "").casefold()
@@ -793,6 +785,23 @@ class Controller:
             current.postgame_deadline = now + 30
             current.invalid_since = None
             print(f"Room {current.room_id} finished; recording 30 seconds postgame.")
+
+        # A replacement claim is permission to hand off only after the
+        # current room is confirmed finished. This prevents a newly reserved
+        # lobby from pulling Craig out of an active game's voice channel.
+        if current.postgame_deadline is not None:
+            replacement = self.candidate(payload, exclude_room=current.room_id)
+            if replacement:
+                returning = len(
+                    {p.casefold() for p in current.players}.intersection(
+                        p.casefold() for p in replacement[2]
+                    )
+                )
+                if returning >= 3:
+                    await self.stop(discard=False)
+                    await self.start(replacement, payload)
+                    return
+
         if current.postgame_deadline is not None:
             if now >= current.postgame_deadline:
                 await self.stop(discard=False)
