@@ -975,10 +975,11 @@ async def record_selected_room(
                     await speaker_overlay.update(page)
                 if (
                     bridge is not None
-                    # Never abandon a live game merely because another lobby
-                    # contains some of the same players. Replacement handoff
-                    # is safe only after the selected room is confirmed done.
-                    and state is SessionState.POSTGAME
+                    and state in {
+                        SessionState.RECORDING_PREGAME,
+                        SessionState.RECORDING_GAME,
+                        SessionState.POSTGAME,
+                    }
                     and now >= next_bridge_check
                 ):
                     next_bridge_check = now + 1.0
@@ -986,32 +987,35 @@ async def record_selected_room(
                         raise RuntimeError(
                             f"Recorder lost its Pbot claim for room {room_id}."
                         )
-                    if not lifecycle.game_started:
-                        await asyncio.sleep(0.25)
-                        continue
-                    replacement = await bridge.find_replacement(
-                        old_room_id=room_id,
-                        old_players=original_roster,
-                        season_prefix=args.season_prefix,
-                        minimum_overlap=args.replacement_player_overlap,
-                    )
-                    if replacement is not None:
-                        names = ", ".join(replacement["overlap"])
-                        print(
-                            f"Replacement lobby {replacement['room_id']} detected "
-                            f"with {len(replacement['overlap'])} returning players: {names}"
+                    # Heartbeat every active state, but inspect replacements
+                    # only after this room is confirmed finished. Keeping
+                    # these concerns separate prevents the claim from
+                    # expiring during a normal game while also protecting the
+                    # current recording from premature handoff.
+                    if state is SessionState.POSTGAME and lifecycle.game_started:
+                        replacement = await bridge.find_replacement(
+                            old_room_id=room_id,
+                            old_players=original_roster,
+                            season_prefix=args.season_prefix,
+                            minimum_overlap=args.replacement_player_overlap,
                         )
-                        # The match is already valid and must never be
-                        # discarded merely because its players quickly
-                        # formed another lobby. End only the optional
-                        # postgame tail, save this match, then hand off.
-                        lifecycle.state = SessionState.COMPLETED
-                        successful = True
-                        print(
-                            "Ending postgame early, saving the completed "
-                            "game, and handing off immediately."
-                        )
-                        state = lifecycle.state
+                        if replacement is not None:
+                            names = ", ".join(replacement["overlap"])
+                            print(
+                                f"Replacement lobby {replacement['room_id']} detected "
+                                f"with {len(replacement['overlap'])} returning players: {names}"
+                            )
+                            # The match is already valid and must never be
+                            # discarded merely because its players quickly
+                            # formed another lobby. End only the optional
+                            # postgame tail, save this match, then hand off.
+                            lifecycle.state = SessionState.COMPLETED
+                            successful = True
+                            print(
+                                "Ending postgame early, saving the completed "
+                                "game, and handing off immediately."
+                            )
+                            state = lifecycle.state
                 if state is not last_state:
                     print(f"Recording state: {last_state.value} -> {state.value}")
                     if state is SessionState.RECORDING_GAME:
