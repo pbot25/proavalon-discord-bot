@@ -253,10 +253,13 @@ class RecorderBridge:
                     "claimed": False,
                     "recorder_id": current["recorder_id"],
                 })
-            self.room_claims[key] = {
-                "recorder_id": recorder_id,
-                "expires_at": time.monotonic() + 15,
-            }
+            if current is None:
+                current = {
+                    "recorder_id": recorder_id,
+                    "claimed_at": datetime.now(timezone.utc).isoformat(),
+                }
+                self.room_claims[key] = current
+            current["expires_at"] = time.monotonic() + 15
         return web.json_response({"claimed": True, "recorder_id": recorder_id})
 
     async def heartbeat_claim(self, request: web.Request) -> web.Response:
@@ -266,10 +269,29 @@ class RecorderBridge:
             self._discard_expired_claims()
             key = (guild_id, room_id)
             current = self.room_claims.get(key)
-            if current is None or current["recorder_id"] != recorder_id:
-                return web.json_response({"claimed": False})
-            current["expires_at"] = time.monotonic() + 15
-        return web.json_response({"claimed": True})
+            claimed = current is not None and current["recorder_id"] == recorder_id
+            if claimed:
+                current["expires_at"] = time.monotonic() + 15
+                claimed_at = str(current.get("claimed_at") or "")
+            else:
+                claimed_at = ""
+        match = await get_match_for_recording(guild_id, room_id)
+        match_archived = False
+        if match is not None and claimed_at:
+            try:
+                match_finished = datetime.fromisoformat(
+                    str(match["finished_at"]).replace("Z", "+00:00")
+                )
+                claim_started = datetime.fromisoformat(
+                    claimed_at.replace("Z", "+00:00")
+                )
+                match_archived = match_finished >= claim_started
+            except (TypeError, ValueError):
+                match_archived = False
+        return web.json_response({
+            "claimed": claimed,
+            "match_archived": match_archived,
+        })
 
     async def release_claim(self, request: web.Request) -> web.Response:
         self._authorize_recorder(request)
@@ -592,10 +614,30 @@ class RecorderBridge:
                     "guild_id": claim_guild_id,
                     "room_id": room_id,
                     "recorder_id": claim["recorder_id"],
+                    "claimed_at": claim.get("claimed_at"),
                 }
                 for (claim_guild_id, room_id), claim in self.room_claims.items()
                 if not guild_id_text or claim_guild_id == int(guild_id_text)
             ]
+        archived_room_ids = []
+        if guild_id_text:
+            for claim in claims:
+                match = await get_match_for_recording(
+                    int(guild_id_text), int(claim["room_id"])
+                )
+                if match is None or not claim.get("claimed_at"):
+                    continue
+                try:
+                    match_finished = datetime.fromisoformat(
+                        str(match["finished_at"]).replace("Z", "+00:00")
+                    )
+                    claim_started = datetime.fromisoformat(
+                        str(claim["claimed_at"]).replace("Z", "+00:00")
+                    )
+                except (TypeError, ValueError):
+                    continue
+                if match_finished >= claim_started:
+                    archived_room_ids.append(int(claim["room_id"]))
         return web.json_response({
             "observed_at": datetime.now(timezone.utc).isoformat(),
             "active_season": (
@@ -612,4 +654,5 @@ class RecorderBridge:
             "recording_config": recording_config,
             "voice_channels": voice_channels,
             "room_claims": claims,
+            "archived_room_ids": archived_room_ids,
         })

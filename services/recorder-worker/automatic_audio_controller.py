@@ -71,6 +71,10 @@ class Controller:
             3600,
             int(os.getenv("RECORDER_ORPHAN_RETENTION_HOURS", "24")) * 3600,
         )
+        self.started_game_grace_seconds = max(
+            300,
+            int(os.getenv("RECORDER_STARTED_GAME_GRACE_SECONDS", "7200")),
+        )
         self.next_cleanup_at = 0.0
         self.ssl_context = ssl.create_default_context(cafile=certifi.where())
 
@@ -781,9 +785,21 @@ class Controller:
         lobby = next((item for item in payload.get("lobbies") or [] if int(item.get("room_id", -1)) == current.room_id), None)
         now = time.monotonic()
         status = str((lobby or {}).get("status") or "").casefold()
-        if status == "finished" and current.postgame_deadline is None:
+        archived = current.room_id in {
+            int(room_id) for room_id in payload.get("archived_room_ids") or []
+        }
+        if (status == "finished" or archived) and current.postgame_deadline is None:
             current.postgame_deadline = now + 30
             current.invalid_since = None
+            if archived and status != "finished":
+                print(
+                    f"Pbot archived room {current.room_id}; using the archive "
+                    "as the audio completion fallback."
+                )
+                await self.audit(
+                    current.room_id,
+                    "voice_archive_completion_fallback",
+                )
             print(f"Room {current.room_id} finished; recording 30 seconds postgame.")
 
         # A replacement claim is permission to hand off only after the
@@ -816,7 +832,7 @@ class Controller:
             current.invalid_since = now
         elif not invalid:
             current.invalid_since = None
-        elif now - current.invalid_since >= 120:
+        elif now - current.invalid_since >= self.started_game_grace_seconds:
             await self.stop(discard=True)
 
     async def run(self):

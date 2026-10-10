@@ -194,15 +194,16 @@ class PbotBridgeClient:
         result = await self._claim_request("POST", "/recorder/claims", room_id)
         return bool(result.get("claimed"))
 
-    async def heartbeat_room(self, room_id: int) -> bool:
+    async def heartbeat_room(self, room_id: int) -> dict:
         result = await self._claim_request(
             "POST", "/recorder/claims/heartbeat", room_id
         )
-        if result.get("claimed"):
-            return True
+        if result.get("claimed") or result.get("match_archived"):
+            return result
         # Pbot restarts clear its in-memory leases. Reclaim the same room
         # instead of interrupting an otherwise healthy recording.
-        return await self.claim_room(room_id)
+        result["claimed"] = await self.claim_room(room_id)
+        return result
 
     async def release_room(self, room_id: int) -> None:
         await self._claim_request("DELETE", "/recorder/claims", room_id)
@@ -758,7 +759,11 @@ def parse_args():
     parser.add_argument("--headed", action="store_true")
     parser.add_argument("--keep-webm", action="store_true")
     parser.add_argument("--postgame-seconds", type=float, default=30.0)
-    parser.add_argument("--abandonment-grace-seconds", type=float, default=120.0)
+    parser.add_argument(
+        "--abandonment-grace-seconds",
+        type=float,
+        default=float(os.getenv("RECORDER_STARTED_GAME_GRACE_SECONDS", "7200")),
+    )
     parser.add_argument("--abandonment-player-threshold", type=int, default=4)
     parser.add_argument("--replacement-player-overlap", type=int, default=3)
     args = parser.parse_args()
@@ -983,9 +988,29 @@ async def record_selected_room(
                     and now >= next_bridge_check
                 ):
                     next_bridge_check = now + 1.0
-                    if not await bridge.heartbeat_room(room_id):
+                    heartbeat = await bridge.heartbeat_room(room_id)
+                    if not heartbeat.get("claimed") and not heartbeat.get("match_archived"):
                         raise RuntimeError(
                             f"Recorder lost its Pbot claim for room {room_id}."
+                        )
+                    if (
+                        heartbeat.get("match_archived")
+                        and state is SessionState.RECORDING_GAME
+                    ):
+                        state = lifecycle.update(
+                            now=now,
+                            room_present=present,
+                            player_count=count,
+                            game_in_progress=False,
+                            game_finished=True,
+                        )
+                        print(
+                            f"Pbot archived room {room_id}; using the archive "
+                            "as the recording completion fallback."
+                        )
+                        await bridge.audit(
+                            room_id,
+                            "browser_archive_completion_fallback",
                         )
                     # Heartbeat every active state, but inspect replacements
                     # only after this room is confirmed finished. Keeping
