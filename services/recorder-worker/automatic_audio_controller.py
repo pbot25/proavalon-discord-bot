@@ -55,6 +55,10 @@ class Controller:
         self.media_pipeline_lock = asyncio.Lock()
         self.handoff_retry_at: dict[Path, float] = {}
         self.handoff_attempts: dict[Path, int] = {}
+        self.upload_max_attempts = max(
+            1,
+            int(os.getenv("RECORDER_UPLOAD_MAX_ATTEMPTS", "5")),
+        )
         self.minimum_free_bytes = max(
             0,
             int(float(os.getenv("RECORDER_MIN_FREE_GB", "1")) * 1024**3),
@@ -423,6 +427,7 @@ class Controller:
         async with self.media_pipeline_lock:
             room_id = None
             metadata: dict = {}
+            upload_attempted = False
             try:
                 metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
                 if metadata.get("youtube_url"):
@@ -440,6 +445,25 @@ class Controller:
                         self.cleanup_completed_recording(metadata_path, metadata)
                     return
                 room_id = int(metadata["room_id"])
+                # YouTube may have accepted the video even if Pbot's completion
+                # callback failed. In that case the large local media is no
+                # longer needed; retry only the inexpensive callback metadata.
+                if metadata.get("youtube_video_id"):
+                    upload_attempted = True
+                    youtube_url = await self.upload_to_youtube(
+                        self.final_dir / f"proavalon-room-{room_id}-complete.mp4",
+                        room_id,
+                        metadata,
+                        metadata_path,
+                    )
+                    metadata["youtube_url"] = youtube_url
+                    metadata["cleanup_after_upload"] = True
+                    metadata_path.write_text(
+                        json.dumps(metadata, indent=2), encoding="utf-8"
+                    )
+                    self.cleanup_completed_recording(metadata_path, metadata)
+                    await self.audit(room_id, "media_cleanup_completed")
+                    return
                 audio_path = Path(str(metadata.get("mixed_mp3") or ""))
                 if not audio_path.is_file():
                     await self.audit(room_id, "audio_mix_started")
@@ -491,6 +515,7 @@ class Controller:
                     else None,
                 )
                 await self.audit(room_id, "final_video_created", str(final_path))
+                upload_attempted = True
                 youtube_url = await self.upload_to_youtube(
                     final_path, room_id, metadata, metadata_path
                 )
@@ -530,32 +555,58 @@ class Controller:
                     and "user has exceeded the number of videos"
                     in error_text.casefold()
                 )
-                if quota_exhausted:
-                    retry_seconds = self.youtube_quota_reset_delay()
-                    retry_message = (
-                        "YouTube's daily upload quota is exhausted; retrying "
-                        "shortly after the next midnight-Pacific reset."
-                    )
-                elif channel_upload_limited:
-                    retry_seconds = 24 * 60 * 60
-                    retry_message = (
-                        "The YouTube channel's daily upload limit is exhausted; "
-                        "retrying in 24 hours."
-                    )
-                else:
-                    retry_seconds = min(300, 2 ** min(attempts, 8))
-                    retry_message = f"Retrying in {retry_seconds} seconds."
-                self.handoff_retry_at[metadata_path] = time.monotonic() + retry_seconds
-                if quota_exhausted or channel_upload_limited:
-                    metadata["youtube_retry_after"] = time.time() + retry_seconds
-                    metadata["youtube_retry_reason"] = (
-                        "api_daily_quota"
-                        if quota_exhausted
-                        else "channel_daily_upload_limit"
-                    )
+                if upload_attempted:
+                    persistent_attempts = int(metadata.get("upload_failure_attempts") or 0) + 1
+                    metadata["upload_failure_attempts"] = persistent_attempts
+
+                    # A saved video ID proves YouTube has the bytes already.
+                    # Remove the large files now and retain only metadata needed
+                    # to retry Pbot's completion callback.
+                    if metadata.get("youtube_video_id"):
+                        self.cleanup_recording_media(metadata)
+                    elif quota_exhausted or channel_upload_limited or (
+                        persistent_attempts >= self.upload_max_attempts
+                    ):
+                        cleanup_error = None
+                        if metadata.get("delete_key"):
+                            try:
+                                await self.delete_craig_recording(
+                                    str(metadata["recording_id"]),
+                                    str(metadata["access_key"]),
+                                    str(metadata["delete_key"]),
+                                )
+                            except Exception as error:
+                                cleanup_error = str(error)
+                        reason = (
+                            "youtube_limit"
+                            if quota_exhausted or channel_upload_limited
+                            else "upload_failed"
+                        )
+                        self.cleanup_completed_recording(
+                            metadata_path, metadata, reason=reason
+                        )
+                        self.handoff_retry_at.pop(metadata_path, None)
+                        self.handoff_attempts.pop(metadata_path, None)
+                        detail = (
+                            f"Discarded after {persistent_attempts} failed upload "
+                            f"attempt(s): {error_text}"
+                        )
+                        if cleanup_error:
+                            detail += f"; Craig cleanup also failed: {cleanup_error}"
+                        print(f"Room {room_id} {detail}")
+                        if room_id is not None:
+                            await self.audit(
+                                room_id, "failed_upload_media_discarded", detail
+                            )
+                        return
+
                     metadata_path.write_text(
                         json.dumps(metadata, indent=2), encoding="utf-8"
                     )
+
+                retry_seconds = min(300, 2 ** min(attempts, 8))
+                retry_message = f"Retrying in {retry_seconds} seconds."
+                self.handoff_retry_at[metadata_path] = time.monotonic() + retry_seconds
                 room_label = str(room_id) if room_id is not None else metadata_path.name
                 print(
                     f"Room {room_label} recording handoff failed: {error}. "
@@ -589,10 +640,23 @@ class Controller:
     def cleanup_completed_recording(
         self, metadata_path: Path, metadata: dict, *, reason: str = "uploaded"
     ) -> None:
+        freed = self.cleanup_recording_media(metadata)
+        freed += self._safe_unlink(metadata_path)
         try:
             room_id = int(metadata["room_id"])
         except (KeyError, TypeError, ValueError):
             return
+        print(
+            f"Cleaned {reason} room {room_id} media "
+            f"({freed / (1024 * 1024):.1f} MiB freed)."
+        )
+
+    def cleanup_recording_media(self, metadata: dict) -> int:
+        """Delete large local media while optionally preserving retry metadata."""
+        try:
+            room_id = int(metadata["room_id"])
+        except (KeyError, TypeError, ValueError):
+            return 0
         paths = {
             Path(str(metadata.get("mixed_mp3") or "")),
             Path(str(metadata.get("final_mp4") or "")),
@@ -600,12 +664,7 @@ class Controller:
         }
         if self.video_dir.exists():
             paths.update(self.video_dir.rglob(f"proavalon-room-{room_id}-*"))
-        freed = sum(self._safe_unlink(path) for path in paths if str(path))
-        freed += self._safe_unlink(metadata_path)
-        print(
-            f"Cleaned {reason} room {room_id} media "
-            f"({freed / (1024 * 1024):.1f} MiB freed)."
-        )
+        return sum(self._safe_unlink(path) for path in paths if str(path))
 
     def cleanup_orphaned_media(self) -> None:
         protected: set[Path] = set()
