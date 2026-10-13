@@ -766,6 +766,21 @@ def parse_args():
     )
     parser.add_argument("--abandonment-player-threshold", type=int, default=4)
     parser.add_argument("--replacement-player-overlap", type=int, default=3)
+    parser.add_argument(
+        "--abandoned-replacement-overlap",
+        type=int,
+        default=int(os.getenv("RECORDER_ABANDONED_REPLACEMENT_OVERLAP", "6")),
+        help=(
+            "Players shared with a different lobby before an active room is "
+            "treated as abandoned."
+        ),
+    )
+    parser.add_argument(
+        "--max-game-seconds",
+        type=float,
+        default=float(os.getenv("RECORDER_MAX_GAME_SECONDS", "5400")),
+        help="Hard safety limit for a recording whose room state never finishes.",
+    )
     args = parser.parse_args()
     args.username = os.getenv("RECORDER_PROAVALON_USERNAME", "").strip()
     args.password = os.getenv("RECORDER_PROAVALON_PASSWORD", "")
@@ -789,6 +804,10 @@ def parse_args():
         parser.error("--abandonment-player-threshold must be between 0 and 9.")
     if not 1 <= args.replacement_player_overlap <= 10:
         parser.error("--replacement-player-overlap must be between 1 and 10.")
+    if not 1 <= args.abandoned_replacement_overlap <= 10:
+        parser.error("--abandoned-replacement-overlap must be between 1 and 10.")
+    if args.max_game_seconds <= 0:
+        parser.error("--max-game-seconds must be positive.")
     if bool(args.bridge_url) != bool(args.bridge_secret):
         parser.error("Set both RECORDER_BRIDGE_URL and RECORDER_BRIDGE_SECRET.")
     if args.bridge_url and args.guild_id is None:
@@ -1012,6 +1031,32 @@ async def record_selected_room(
                             room_id,
                             "browser_archive_completion_fallback",
                         )
+                    if (
+                        state is SessionState.RECORDING_GAME
+                        and lifecycle.game_started
+                    ):
+                        replacement = await bridge.find_replacement(
+                            old_room_id=room_id,
+                            old_players=original_roster,
+                            season_prefix=args.season_prefix,
+                            minimum_overlap=args.abandoned_replacement_overlap,
+                        )
+                        if replacement is not None:
+                            names = ", ".join(replacement["overlap"])
+                            print(
+                                f"Room {room_id} is stale: replacement lobby "
+                                f"{replacement['room_id']} contains "
+                                f"{len(replacement['overlap'])} returning players "
+                                f"({names}). Cancelling the abandoned recording."
+                            )
+                            await bridge.audit(
+                                room_id,
+                                "browser_abandoned_for_replacement",
+                                f"Replacement room {replacement['room_id']} with "
+                                f"{len(replacement['overlap'])} returning players.",
+                            )
+                            lifecycle.state = SessionState.ABANDONED
+                            state = lifecycle.state
                     # Heartbeat every active state, but inspect replacements
                     # only after this room is confirmed finished. Keeping
                     # these concerns separate prevents the claim from
@@ -1041,6 +1086,23 @@ async def record_selected_room(
                                 "game, and handing off immediately."
                             )
                             state = lifecycle.state
+                if (
+                    state is SessionState.RECORDING_GAME
+                    and game_started_at is not None
+                    and time.monotonic() - game_started_at >= args.max_game_seconds
+                ):
+                    lifecycle.state = SessionState.ABANDONED
+                    state = lifecycle.state
+                    print(
+                        f"Room {room_id} exceeded the {args.max_game_seconds:.0f}s "
+                        "recording safety limit; cancelling stale recording."
+                    )
+                    if bridge is not None:
+                        await bridge.audit(
+                            room_id,
+                            "browser_recording_safety_timeout",
+                            f"Exceeded {args.max_game_seconds:.0f} seconds.",
+                        )
                 if state is not last_state:
                     print(f"Recording state: {last_state.value} -> {state.value}")
                     if state is SessionState.RECORDING_GAME:

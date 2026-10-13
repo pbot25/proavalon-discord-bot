@@ -79,6 +79,17 @@ class Controller:
             300,
             int(os.getenv("RECORDER_STARTED_GAME_GRACE_SECONDS", "7200")),
         )
+        self.abandoned_replacement_overlap = max(
+            1,
+            min(
+                10,
+                int(os.getenv("RECORDER_ABANDONED_REPLACEMENT_OVERLAP", "6")),
+            ),
+        )
+        self.max_game_seconds = max(
+            300,
+            int(os.getenv("RECORDER_MAX_GAME_SECONDS", "5400")),
+        )
         self.next_cleanup_at = 0.0
         self.ssl_context = ssl.create_default_context(cafile=certifi.where())
 
@@ -877,9 +888,43 @@ class Controller:
                     await self.start(replacement, payload)
                     return
 
+        # ProAvalon can leave an abandoned room marked "game in progress"
+        # after most players have moved to another lobby. The old room can
+        # still report ten names indefinitely, so player-count abandonment
+        # alone cannot recover. A majority-roster replacement is conclusive.
+        if current.postgame_deadline is None:
+            replacement = self.candidate(payload, exclude_room=current.room_id)
+            if replacement:
+                returning = len(
+                    {p.casefold() for p in current.players}.intersection(
+                        p.casefold() for p in replacement[2]
+                    )
+                )
+                if returning >= self.abandoned_replacement_overlap:
+                    old_room_id = current.room_id
+                    await self.stop(discard=True)
+                    await self.audit(
+                        old_room_id,
+                        "voice_abandoned_for_replacement",
+                        f"Replacement room {replacement[1]} with "
+                        f"{returning} returning players.",
+                    )
+                    await self.start(replacement, payload)
+                    return
+
         if current.postgame_deadline is not None:
             if now >= current.postgame_deadline:
                 await self.stop(discard=False)
+            return
+
+        if time.time() - current.started_at >= self.max_game_seconds:
+            room_id = current.room_id
+            await self.stop(discard=True)
+            await self.audit(
+                room_id,
+                "voice_recording_safety_timeout",
+                f"Exceeded {self.max_game_seconds} seconds.",
+            )
             return
 
         try:
