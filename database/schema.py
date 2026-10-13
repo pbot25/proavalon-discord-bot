@@ -217,6 +217,8 @@ CREATE TABLE IF NOT EXISTS recording_integrations (
     account_name TEXT NOT NULL,
     account_url TEXT NOT NULL,
     encrypted_refresh_token TEXT NOT NULL,
+    authorized_user_id TEXT,
+    expiration_reminder_sent_at TEXT,
     updated_at TEXT NOT NULL,
     PRIMARY KEY (guild_id, provider)
 );

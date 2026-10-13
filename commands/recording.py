@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import os
+from datetime import datetime, timedelta, timezone
+
 import discord
 from discord import app_commands
-from discord.ext import commands
+from discord.ext import commands, tasks
 
 from database.recording_integrations import (
+    get_pending_youtube_expiration_reminders,
     get_recording_integration,
+    mark_youtube_expiration_reminder_sent,
 )
 from database.recording_audit import get_recording_audit
 from utils.permissions import bot_admin_only
@@ -24,6 +29,94 @@ class RecordingCommands(
 
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
+        testing_mode = os.getenv(
+            "YOUTUBE_OAUTH_TESTING_MODE", "true"
+        ).strip().casefold()
+        if testing_mode not in {"0", "false", "no", "off"}:
+            self.youtube_expiration_reminders.start()
+
+    def cog_unload(self) -> None:
+        self.youtube_expiration_reminders.cancel()
+
+    @tasks.loop(minutes=30)
+    async def youtube_expiration_reminders(self) -> None:
+        try:
+            rows = await get_pending_youtube_expiration_reminders()
+        except Exception as error:
+            print(f"Could not check YouTube expiration reminders: {error}")
+            return
+
+        now = datetime.now(timezone.utc)
+        for row in rows:
+            try:
+                connected_at = datetime.fromisoformat(
+                    str(row["updated_at"]).replace("Z", "+00:00")
+                )
+                if connected_at.tzinfo is None:
+                    connected_at = connected_at.replace(tzinfo=timezone.utc)
+                warning_at = connected_at + timedelta(days=6)
+                if now < warning_at:
+                    continue
+
+                guild_id = int(row["guild_id"])
+                user_id = int(row["authorized_user_id"])
+                expires_at = connected_at + timedelta(days=7)
+                expiry_timestamp = int(expires_at.timestamp())
+                message = (
+                    f"<@{user_id}> **YouTube connection reminder**\n"
+                    f"PBot's testing-mode authorization for "
+                    f"**{row['account_name']}** is expected to expire "
+                    f"<t:{expiry_timestamp}:R>. Run `/recording youtube enable` "
+                    "again today and complete the Google sign-in so automatic "
+                    "match uploads continue."
+                )
+
+                delivered = False
+                try:
+                    user = self.bot.get_user(user_id) or await self.bot.fetch_user(
+                        user_id
+                    )
+                    await user.send(message)
+                    delivered = True
+                except (discord.Forbidden, discord.HTTPException, discord.NotFound):
+                    output_channel_id = row["output_channel_id"]
+                    if output_channel_id:
+                        try:
+                            channel = self.bot.get_channel(int(output_channel_id))
+                            if channel is None:
+                                channel = await self.bot.fetch_channel(
+                                    int(output_channel_id)
+                                )
+                            await channel.send(message)
+                            delivered = True
+                        except (
+                            discord.Forbidden,
+                            discord.HTTPException,
+                            discord.NotFound,
+                            ValueError,
+                        ):
+                            pass
+
+                if delivered:
+                    await mark_youtube_expiration_reminder_sent(
+                        guild_id,
+                        str(row["updated_at"]),
+                    )
+                    print(
+                        f"Sent YouTube expiration reminder to Discord user "
+                        f"{user_id} for guild {guild_id}."
+                    )
+                else:
+                    print(
+                        f"Could not deliver YouTube expiration reminder to "
+                        f"Discord user {user_id} for guild {guild_id}."
+                    )
+            except (KeyError, TypeError, ValueError) as error:
+                print(f"Invalid YouTube expiration reminder row: {error}")
+
+    @youtube_expiration_reminders.before_loop
+    async def before_youtube_expiration_reminders(self) -> None:
+        await self.bot.wait_until_ready()
 
     @youtube.command(
         name="enable",

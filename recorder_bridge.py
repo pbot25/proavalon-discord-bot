@@ -201,6 +201,7 @@ class RecorderBridge:
                 channel_name,
                 f"https://www.youtube.com/channel/{channel_id}",
                 encrypt_refresh_token(refresh_token),
+                int(state["user_id"]),
             )
             return self._youtube_result_page(
                 "YouTube connected",

@@ -505,6 +505,25 @@ async def _migrate_match_durations(
             )
 
 
+async def _migrate_recording_integration_reminders(
+    database: aiosqlite.Connection,
+) -> None:
+    """Persist who authorized YouTube and whether its expiry warning was sent."""
+    if not await _table_exists(database, "recording_integrations"):
+        return
+
+    columns = await _table_columns(database, "recording_integrations")
+    if "authorized_user_id" not in columns:
+        await database.execute(
+            "ALTER TABLE recording_integrations ADD COLUMN authorized_user_id TEXT"
+        )
+    if "expiration_reminder_sent_at" not in columns:
+        await database.execute(
+            "ALTER TABLE recording_integrations "
+            "ADD COLUMN expiration_reminder_sent_at TEXT"
+        )
+
+
 async def _cleanup_redundant_legacy_tables(
     database: aiosqlite.Connection,
 ) -> list[str]:
@@ -610,6 +629,7 @@ async def initialize_database() -> None:
         # full schema script runs against an older production database.
         await _migrate_season_match_ids(database)
         await _migrate_match_durations(database)
+        await _migrate_recording_integration_reminders(database)
         await database.executescript(SCHEMA)
         await _repair_account_link_season_scopes(database)
         await _cleanup_redundant_legacy_tables(database)
