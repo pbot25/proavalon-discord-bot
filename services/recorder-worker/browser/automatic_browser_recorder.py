@@ -143,6 +143,7 @@ class PbotBridgeClient:
         self.guild_id = guild_id
         self.recorder_id = recorder_id
         self.session: aiohttp.ClientSession | None = None
+        self.reported_heartbeat_error = False
 
     async def start(self) -> None:
         self.session = aiohttp.ClientSession(
@@ -195,15 +196,32 @@ class PbotBridgeClient:
         return bool(result.get("claimed"))
 
     async def heartbeat_room(self, room_id: int) -> dict:
-        result = await self._claim_request(
-            "POST", "/recorder/claims/heartbeat", room_id
-        )
-        if result.get("claimed") or result.get("match_archived"):
+        try:
+            result = await self._claim_request(
+                "POST", "/recorder/claims/heartbeat", room_id
+            )
+            if not result.get("claimed") and not result.get("match_archived"):
+                # Pbot restarts clear its in-memory leases. Reclaim the same
+                # room instead of interrupting an otherwise healthy recording.
+                result["claimed"] = await self.claim_room(room_id)
+            if self.reported_heartbeat_error:
+                print("Pbot claim heartbeat reconnected.")
+            self.reported_heartbeat_error = False
             return result
-        # Pbot restarts clear its in-memory leases. Reclaim the same room
-        # instead of interrupting an otherwise healthy recording.
-        result["claimed"] = await self.claim_room(room_id)
-        return result
+        except (
+            aiohttp.ClientError,
+            asyncio.TimeoutError,
+            RuntimeError,
+            ValueError,
+        ) as error:
+            # Pbot/Railway can briefly return 502 or time out. The recording
+            # browser has its own live game state, so never destroy a healthy
+            # capture merely because the diagnostic/claim bridge blipped.
+            if not self.reported_heartbeat_error:
+                detail = str(error) or type(error).__name__
+                print(f"Pbot claim heartbeat temporarily unavailable: {detail}")
+            self.reported_heartbeat_error = True
+            return {"claimed": True, "bridge_unavailable": True}
 
     async def release_room(self, room_id: int) -> None:
         await self._claim_request("DELETE", "/recorder/claims", room_id)
