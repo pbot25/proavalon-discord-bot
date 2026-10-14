@@ -90,6 +90,18 @@ class Controller:
             300,
             int(os.getenv("RECORDER_MAX_GAME_SECONDS", "5400")),
         )
+        # Craig's mixed export can omit a small amount of connection/setup
+        # silence even though its startedAt timestamp includes that interval.
+        # Keep timestamp alignment as the source of truth, then delay the
+        # exported audio by this measured compensation so speech does not lead
+        # the browser recording. Positive values delay audio.
+        self.audio_sync_correction_seconds = max(
+            -10.0,
+            min(
+                10.0,
+                float(os.getenv("RECORDER_AUDIO_SYNC_CORRECTION_SECONDS", "2.0")),
+            ),
+        )
         self.next_cleanup_at = 0.0
         self.ssl_context = ssl.create_default_context(cafile=certifi.where())
 
@@ -274,19 +286,25 @@ class Controller:
         if not ffmpeg:
             raise RuntimeError("FFmpeg is not installed or is not available in PATH")
         timing_path = video_path.with_suffix(".timing.json")
-        audio_offset = 0.0
+        timestamp_offset = 0.0
         if voice_started_at is not None and timing_path.is_file():
             try:
                 timing = json.loads(timing_path.read_text(encoding="utf-8"))
-                audio_offset = float(timing["game_started_at"]) - voice_started_at
-                if abs(audio_offset) > 120:
+                timestamp_offset = (
+                    float(timing["game_started_at"]) - voice_started_at
+                )
+                if abs(timestamp_offset) > 120:
                     print(
                         f"Ignoring implausible room {room_id} synchronization "
-                        f"offset {audio_offset:+.3f}s."
+                        f"offset {timestamp_offset:+.3f}s."
                     )
-                    audio_offset = 0.0
+                    timestamp_offset = 0.0
             except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
                 print(f"Could not read room {room_id} timing metadata: {error}")
+        # A positive effective offset trims leading audio; a negative one
+        # delays audio. Subtracting a positive correction therefore moves the
+        # audio later without discarding the timestamp-based alignment.
+        audio_offset = timestamp_offset - self.audio_sync_correction_seconds
         audio_input = ["-i", str(audio_path)]
         if audio_offset > 0:
             audio_input = ["-ss", f"{audio_offset:.3f}", "-i", str(audio_path)]
@@ -294,7 +312,9 @@ class Controller:
             audio_input = ["-itsoffset", f"{-audio_offset:.3f}", "-i", str(audio_path)]
         print(
             f"Synchronizing room {room_id} Discord audio to browser video "
-            f"(offset {audio_offset:+.3f}s)."
+            f"(timestamp offset {timestamp_offset:+.3f}s, "
+            f"audio correction {self.audio_sync_correction_seconds:+.3f}s, "
+            f"effective offset {audio_offset:+.3f}s)."
         )
         subprocess.run(
             [
