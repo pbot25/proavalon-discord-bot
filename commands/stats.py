@@ -1,5 +1,6 @@
 import asyncio
 from datetime import datetime, timezone
+import math
 
 import discord
 from discord import app_commands
@@ -75,6 +76,93 @@ SOCIAL_LIST_CHOICES = [
         value="nemeses",
     ),
 ]
+
+
+class SocialListView(discord.ui.View):
+    def __init__(
+        self,
+        *,
+        title: str,
+        lines: list[str],
+        season_name: str,
+        minimum_games: int,
+        page_size: int,
+        requesting_user_id: int,
+    ) -> None:
+        super().__init__(timeout=180)
+        self.title = title
+        self.lines = lines
+        self.season_name = season_name
+        self.minimum_games = minimum_games
+        self.page_size = page_size
+        self.requesting_user_id = requesting_user_id
+        self.page = 0
+        self.total_pages = max(1, math.ceil(len(lines) / page_size))
+        self._update_buttons()
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id == self.requesting_user_id:
+            return True
+        await interaction.response.send_message(
+            "Only the person who opened this list can change pages.",
+            ephemeral=True,
+        )
+        return False
+
+    def _update_buttons(self) -> None:
+        self.previous_button.disabled = self.page == 0
+        self.next_button.disabled = self.page >= self.total_pages - 1
+
+    def build_embed(self) -> discord.Embed:
+        start = self.page * self.page_size
+        page_lines = self.lines[start:start + self.page_size]
+        embed = discord.Embed(
+            title=self.title,
+            description=(
+                "\n".join(page_lines)
+                if page_lines
+                else "No players meet the current minimum-games requirement yet."
+            ),
+            color=discord.Color.blurple(),
+        )
+        embed.set_footer(
+            text=(
+                f"{self.season_name} • Minimum: {self.minimum_games} game(s) • "
+                f"Page {self.page + 1}/{self.total_pages} • "
+                f"{len(self.lines)} result(s) • {self.page_size}/page"
+            )
+        )
+        return embed
+
+    @discord.ui.button(
+        label="Previous", emoji="◀️", style=discord.ButtonStyle.secondary
+    )
+    async def previous_button(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button,
+    ) -> None:
+        if self.page > 0:
+            self.page -= 1
+        self._update_buttons()
+        await interaction.response.edit_message(embed=self.build_embed(), view=self)
+
+    @discord.ui.button(
+        label="Next", emoji="▶️", style=discord.ButtonStyle.secondary
+    )
+    async def next_button(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button,
+    ) -> None:
+        if self.page < self.total_pages - 1:
+            self.page += 1
+        self._update_buttons()
+        await interaction.response.edit_message(embed=self.build_embed(), view=self)
+
+    async def on_timeout(self) -> None:
+        for child in self.children:
+            child.disabled = True
 
 
 def get_rating_bracket_emoji(
@@ -1680,6 +1768,7 @@ class StatsCommands(
         minimum_games=(
             "Minimum games together/opposite required to appear. Defaults to 1."
         ),
+        results_per_page="Number of results shown on each page. Defaults to 10.",
     )
     @app_commands.choices(category=SOCIAL_LIST_CHOICES)
     @app_commands.autocomplete(username=registered_username_autocomplete)
@@ -1690,6 +1779,7 @@ class StatsCommands(
         username: str | None = None,
         discord_user: discord.Member | None = None,
         minimum_games: app_commands.Range[int, 1, 999] = 1,
+        results_per_page: app_commands.Range[int, 5, 25] = 10,
     ) -> None:
         if interaction.guild_id is None:
             await interaction.response.send_message(
@@ -1775,7 +1865,7 @@ class StatsCommands(
                     f"• {int(row['same_games'])} same "
                     f"• {int(row['opposite_games'])} opposite"
                 )
-                for index, row in enumerate(relationships[:10], start=1)
+                for index, row in enumerate(relationships, start=1)
             ]
 
         elif category.value == "teammates":
@@ -1800,7 +1890,7 @@ class StatsCommands(
                     f"• {float(row['same_win_rate']):.1f}% WR "
                     f"• {int(row['shared_games'])} total shared"
                 )
-                for index, row in enumerate(relationships[:10], start=1)
+                for index, row in enumerate(relationships, start=1)
             ]
 
         elif category.value == "best-teammates":
@@ -1825,7 +1915,7 @@ class StatsCommands(
                     f"• {int(row['same_wins'])}W–{int(row['same_losses'])}L "
                     f"• {int(row['same_games'])} games together"
                 )
-                for index, row in enumerate(relationships[:10], start=1)
+                for index, row in enumerate(relationships, start=1)
             ]
 
         elif category.value == "worst-teammates":
@@ -1850,7 +1940,7 @@ class StatsCommands(
                     f"• {int(row['same_wins'])}W–{int(row['same_losses'])}L "
                     f"• {int(row['same_games'])} games together"
                 )
-                for index, row in enumerate(relationships[:10], start=1)
+                for index, row in enumerate(relationships, start=1)
             ]
 
         elif category.value == "rivals":
@@ -1875,7 +1965,7 @@ class StatsCommands(
                     f"{int(row['opponent_losses'])} "
                     f"• {float(row['opponent_win_rate']):.1f}% WR"
                 )
-                for index, row in enumerate(relationships[:10], start=1)
+                for index, row in enumerate(relationships, start=1)
             ]
 
         elif category.value == "most-dominated":
@@ -1901,7 +1991,7 @@ class StatsCommands(
                     f"{int(row['opponent_losses'])}L "
                     f"• {int(row['opposite_games'])} opponent games"
                 )
-                for index, row in enumerate(relationships[:10], start=1)
+                for index, row in enumerate(relationships, start=1)
             ]
 
         else:
@@ -1927,28 +2017,18 @@ class StatsCommands(
                     f"{int(row['opponent_losses'])}L "
                     f"• {int(row['opposite_games'])} opponent games"
                 )
-                for index, row in enumerate(relationships[:10], start=1)
+                for index, row in enumerate(relationships, start=1)
             ]
 
-        embed = discord.Embed(
+        view = SocialListView(
             title=title,
-            description=(
-                "\n".join(lines)
-                if lines
-                else (
-                    "No players meet the current minimum-games "
-                    "requirement yet."
-                )
-            ),
-            color=discord.Color.blurple(),
+            lines=lines,
+            season_name=season_display_name(season),
+            minimum_games=minimum,
+            page_size=int(results_per_page),
+            requesting_user_id=interaction.user.id,
         )
-        embed.set_footer(
-            text=(
-                f"{season_display_name(season)} • "
-                f"Minimum: {minimum} game(s) • Top 10"
-            )
-        )
-        await interaction.followup.send(embed=embed)
+        await interaction.followup.send(embed=view.build_embed(), view=view)
 
 
     @app_commands.command(

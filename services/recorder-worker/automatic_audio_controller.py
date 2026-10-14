@@ -174,6 +174,11 @@ class Controller:
             for claim in payload.get("room_claims") or []
             if str(claim.get("recorder_id") or "") == self.recorder_id
         }
+        cancelled_rooms = {
+            int(item["room_id"])
+            for item in payload.get("cancelled_rooms") or []
+            if item.get("room_id") is not None
+        }
         candidates = []
         for lobby in payload.get("lobbies") or []:
             try:
@@ -182,7 +187,12 @@ class Controller:
                 status = str(lobby.get("status") or "").casefold()
             except (KeyError, TypeError, ValueError):
                 continue
-            if room_id == exclude_room or status != "game in progress" or len(players) != 10:
+            if (
+                room_id == exclude_room
+                or room_id in cancelled_rooms
+                or status != "game in progress"
+                or len(players) != 10
+            ):
                 continue
             if room_id not in claimed_rooms:
                 continue
@@ -245,6 +255,28 @@ class Controller:
         await self.audit(current.room_id, "voice_recording_stopped")
         self.spawn(self._prepare_audio_handoff(current, result))
         print(f"Room {current.room_id} stopped; audio processing continues in the background.")
+
+    def discard_room_media(self, room_id: int) -> int:
+        removed_bytes = 0
+        patterns = (
+            f"*room-{room_id}-*",
+            f"room-{room_id}-*",
+        )
+        for root in {self.video_dir, self.output_dir, self.final_dir}:
+            if not root.exists():
+                continue
+            seen: set[Path] = set()
+            for pattern in patterns:
+                for path in root.rglob(pattern):
+                    if path in seen or not path.is_file():
+                        continue
+                    seen.add(path)
+                    try:
+                        removed_bytes += path.stat().st_size
+                        path.unlink(missing_ok=True)
+                    except OSError as error:
+                        print(f"Could not delete cancelled room media {path}: {error}")
+        return removed_bytes
 
     async def _prepare_audio_handoff(self, current: ActiveRecording, result: dict):
         metadata = {
@@ -872,6 +904,25 @@ class Controller:
             return
 
         current = self.active
+        cancelled = current.room_id in {
+            int(item["room_id"])
+            for item in payload.get("cancelled_rooms") or []
+            if item.get("room_id") is not None
+        }
+        if cancelled:
+            room_id = current.room_id
+            await self.stop(discard=True)
+            removed = self.discard_room_media(room_id)
+            await self.audit(
+                room_id,
+                "voice_admin_discarded",
+                f"Deleted {removed} bytes of recorder-worker media.",
+            )
+            print(
+                f"Administrator cancelled room {room_id}; Craig and "
+                f"{removed / (1024**2):.1f} MiB of media were discarded."
+            )
+            return
         lobby = next((item for item in payload.get("lobbies") or [] if int(item.get("room_id", -1)) == current.room_id), None)
         now = time.monotonic()
         status = str((lobby or {}).get("status") or "").casefold()

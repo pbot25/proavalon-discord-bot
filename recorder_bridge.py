@@ -45,6 +45,7 @@ class RecorderBridge:
         self.port = int(os.getenv("PORT", "8080"))
         self.runner: web.AppRunner | None = None
         self.room_claims: dict[tuple[int, int], dict[str, object]] = {}
+        self.room_cancellations: dict[tuple[int, int], dict[str, object]] = {}
         self.claim_lock = asyncio.Lock()
 
     async def start(self) -> None:
@@ -242,12 +243,80 @@ class RecorderBridge:
         for key in expired:
             self.room_claims.pop(key, None)
 
+    def _discard_expired_cancellations(self) -> None:
+        now = time.monotonic()
+        expired = [
+            key for key, cancellation in self.room_cancellations.items()
+            if float(cancellation["expires_at"]) <= now
+        ]
+        for key in expired:
+            self.room_cancellations.pop(key, None)
+
+    async def request_room_cancellation(
+        self,
+        guild_id: int,
+        requested_by: int,
+        room_id: int | None = None,
+    ) -> dict[str, object]:
+        """Signal recorder processes to discard one active room immediately."""
+        async with self.claim_lock:
+            self._discard_expired_claims()
+            self._discard_expired_cancellations()
+            active = [
+                (claimed_room_id, claim)
+                for (claim_guild_id, claimed_room_id), claim in self.room_claims.items()
+                if claim_guild_id == guild_id
+            ]
+            if room_id is None:
+                if not active:
+                    raise ValueError("No recorder currently has an active room claim.")
+                if len(active) > 1:
+                    rooms = ", ".join(str(item[0]) for item in active)
+                    raise ValueError(
+                        f"Multiple rooms are being recorded ({rooms}); provide `room_id`."
+                    )
+                room_id, claim = active[0]
+            else:
+                claim = self.room_claims.get((guild_id, room_id))
+                if claim is None:
+                    raise ValueError(
+                        f"No recorder currently has an active claim for room {room_id}."
+                    )
+
+            cancellation = {
+                "room_id": room_id,
+                "recorder_id": (
+                    str(claim.get("recorder_id") or "") if claim else ""
+                ),
+                "requested_by": requested_by,
+                "requested_at": datetime.now(timezone.utc).isoformat(),
+                # Room IDs are not reused quickly. Keeping the block long
+                # enough prevents a stale abandoned lobby from being reclaimed.
+                "expires_at": time.monotonic() + (12 * 60 * 60),
+            }
+            self.room_cancellations[(guild_id, room_id)] = cancellation
+
+        await append_recording_audit(
+            guild_id,
+            room_id,
+            "admin_discard_requested",
+            recorder_id=str(cancellation["recorder_id"]) or None,
+            detail=f"Requested by Discord user {requested_by}.",
+        )
+        return cancellation
+
     async def claim_room(self, request: web.Request) -> web.Response:
         self._authorize_recorder(request)
         guild_id, room_id, recorder_id = self._claim_identity(await request.json())
         async with self.claim_lock:
             self._discard_expired_claims()
+            self._discard_expired_cancellations()
             key = (guild_id, room_id)
+            if key in self.room_cancellations:
+                return web.json_response({
+                    "claimed": False,
+                    "cancel_requested": True,
+                })
             current = self.room_claims.get(key)
             if current is not None and current["recorder_id"] != recorder_id:
                 return web.json_response({
@@ -268,7 +337,9 @@ class RecorderBridge:
         guild_id, room_id, recorder_id = self._claim_identity(await request.json())
         async with self.claim_lock:
             self._discard_expired_claims()
+            self._discard_expired_cancellations()
             key = (guild_id, room_id)
+            cancellation = self.room_cancellations.get(key)
             current = self.room_claims.get(key)
             claimed = current is not None and current["recorder_id"] == recorder_id
             if claimed:
@@ -292,6 +363,7 @@ class RecorderBridge:
         return web.json_response({
             "claimed": claimed,
             "match_archived": match_archived,
+            "cancel_requested": cancellation is not None,
         })
 
     async def release_claim(self, request: web.Request) -> web.Response:
@@ -610,6 +682,7 @@ class RecorderBridge:
                 }
         async with self.claim_lock:
             self._discard_expired_claims()
+            self._discard_expired_cancellations()
             claims = [
                 {
                     "guild_id": claim_guild_id,
@@ -619,6 +692,18 @@ class RecorderBridge:
                 }
                 for (claim_guild_id, room_id), claim in self.room_claims.items()
                 if not guild_id_text or claim_guild_id == int(guild_id_text)
+            ]
+            cancellations = [
+                {
+                    "guild_id": cancel_guild_id,
+                    "room_id": room_id,
+                    "recorder_id": cancellation.get("recorder_id"),
+                    "requested_by": cancellation.get("requested_by"),
+                    "requested_at": cancellation.get("requested_at"),
+                }
+                for (cancel_guild_id, room_id), cancellation
+                in self.room_cancellations.items()
+                if not guild_id_text or cancel_guild_id == int(guild_id_text)
             ]
         archived_room_ids = []
         if guild_id_text:
@@ -655,5 +740,6 @@ class RecorderBridge:
             "recording_config": recording_config,
             "voice_channels": voice_channels,
             "room_claims": claims,
+            "cancelled_rooms": cancellations,
             "archived_room_ids": archived_room_ids,
         })

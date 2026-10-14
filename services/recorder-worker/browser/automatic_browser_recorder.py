@@ -200,6 +200,8 @@ class PbotBridgeClient:
             result = await self._claim_request(
                 "POST", "/recorder/claims/heartbeat", room_id
             )
+            if result.get("cancel_requested"):
+                return result
             if not result.get("claimed") and not result.get("match_archived"):
                 # Pbot restarts clear its in-memory leases. Reclaim the same
                 # room instead of interrupting an otherwise healthy recording.
@@ -1026,6 +1028,17 @@ async def record_selected_room(
                 ):
                     next_bridge_check = now + 1.0
                     heartbeat = await bridge.heartbeat_room(room_id)
+                    if heartbeat.get("cancel_requested"):
+                        print(
+                            f"Pbot administrator cancelled room {room_id}; "
+                            "discarding the browser recording immediately."
+                        )
+                        await bridge.audit(
+                            room_id,
+                            "browser_admin_discarded",
+                        )
+                        lifecycle.state = SessionState.ABANDONED
+                        state = lifecycle.state
                     if not heartbeat.get("claimed") and not heartbeat.get("match_archived"):
                         raise RuntimeError(
                             f"Recorder lost its Pbot claim for room {room_id}."

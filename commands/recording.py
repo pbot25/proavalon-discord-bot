@@ -238,6 +238,47 @@ class RecordingCommands(
             ephemeral=True,
         )
 
+    @app_commands.command(
+        name="halt",
+        description="Immediately discards an active abandoned/cancelled recording.",
+    )
+    @app_commands.describe(
+        room_id=(
+            "ProAvalon room to discard. Leave blank when only one room is active."
+        )
+    )
+    @bot_admin_only()
+    async def halt(
+        self,
+        interaction: discord.Interaction,
+        room_id: int | None = None,
+    ) -> None:
+        if interaction.guild_id is None:
+            await interaction.response.send_message(
+                "This command can only be used in a server.", ephemeral=True
+            )
+            return
+        try:
+            cancellation = await self.bot.recorder_bridge.request_room_cancellation(
+                interaction.guild_id,
+                interaction.user.id,
+                room_id,
+            )
+        except ValueError as error:
+            await interaction.response.send_message(str(error), ephemeral=True)
+            return
+
+        recorder = str(cancellation.get("recorder_id") or "the recorder")
+        cancelled_room = int(cancellation["room_id"])
+        await interaction.response.send_message(
+            (
+                f"Room `{cancelled_room}` was marked for immediate discard by "
+                f"**{recorder}**. Browser video, Craig audio, and temporary "
+                "media will be deleted, and the worker will return to lobby detection."
+            ),
+            ephemeral=True,
+        )
+
     async def cog_app_command_error(
         self,
         interaction: discord.Interaction,
