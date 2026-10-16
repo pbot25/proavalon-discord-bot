@@ -1075,6 +1075,166 @@ class SeasonCommands(
         )
 
     @app_commands.command(
+        name="next-lobby-ping",
+        description="Pings voice members who are not already in an ongoing match.",
+    )
+    @app_commands.describe(
+        voice_channel=(
+            "Voice channel to check. Defaults to the channel you are currently in."
+        ),
+        message=(
+            "Optional message. Defaults to an invitation to join the next lobby."
+        ),
+    )
+    @bot_admin_only()
+    async def next_lobby_ping(
+        self,
+        interaction: discord.Interaction,
+        voice_channel: discord.VoiceChannel | None = None,
+        message: app_commands.Range[str, 1, 1000] | None = None,
+    ) -> None:
+        if interaction.guild_id is None or interaction.guild is None:
+            await interaction.response.send_message(
+                "This command can only be used in a server.",
+                ephemeral=True,
+            )
+            return
+
+        season = await get_active_season(interaction.guild_id)
+        if season is None:
+            await interaction.response.send_message(
+                "No community season is currently active.",
+                ephemeral=True,
+            )
+            return
+
+        target_channel = voice_channel
+        if target_channel is None:
+            member = interaction.user
+            voice_state = (
+                member.voice
+                if isinstance(member, discord.Member)
+                else None
+            )
+            current_channel = voice_state.channel if voice_state else None
+            if isinstance(current_channel, discord.VoiceChannel):
+                target_channel = current_channel
+
+        if target_channel is None:
+            await interaction.response.send_message(
+                (
+                    "Join a voice channel first, or select one with the "
+                    "`voice_channel` option."
+                ),
+                ephemeral=True,
+            )
+            return
+
+        if target_channel.guild.id != interaction.guild_id:
+            await interaction.response.send_message(
+                "Choose a voice channel from this server.",
+                ephemeral=True,
+            )
+            return
+
+        leaderboard_cog = self.bot.get_cog("LeaderboardCommands")
+        tracker = getattr(leaderboard_cog, "rating_tracker", None)
+        if tracker is None:
+            await interaction.response.send_message(
+                "The live ProAvalon match tracker is not ready right now.",
+                ephemeral=True,
+            )
+            return
+
+        ongoing_usernames = {
+            str(username).casefold()
+            for lobby in tracker.get_recorder_lobby_snapshot()
+            if str(lobby.get("status") or "").casefold() == "game in progress"
+            for username in lobby.get("players") or []
+            if isinstance(username, str)
+        }
+        linked_players = await get_registered_players_with_links(
+            interaction.guild_id,
+            int(season["id"]),
+        )
+        linked_username_by_discord_id = {
+            int(row["discord_user_id"]): str(row["proavalon_username"]).casefold()
+            for row in linked_players
+            if row["discord_user_id"] is not None
+        }
+
+        eligible_members = [
+            member
+            for member in target_channel.members
+            if (
+                not member.bot
+                and linked_username_by_discord_id.get(member.id)
+                not in ongoing_usernames
+            )
+        ]
+        excluded_count = sum(
+            1
+            for member in target_channel.members
+            if (
+                not member.bot
+                and linked_username_by_discord_id.get(member.id)
+                in ongoing_usernames
+            )
+        )
+
+        if not eligible_members:
+            await interaction.response.send_message(
+                (
+                    f"Nobody in {target_channel.mention} is available to ping. "
+                    f"{excluded_count} member(s) are already in an ongoing match."
+                ),
+                ephemeral=True,
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+            return
+
+        lobby_message = (
+            message.strip()
+            if message is not None
+            else "You are available for the next ProAvalon lobby — join when it opens!"
+        )
+        mention_chunks: list[str] = []
+        current_mentions: list[str] = []
+        current_length = len(lobby_message) + 2
+        for member in eligible_members:
+            mention = member.mention
+            added_length = len(mention) + (1 if current_mentions else 0)
+            if current_mentions and current_length + added_length > 1750:
+                mention_chunks.append(" ".join(current_mentions))
+                current_mentions = []
+                current_length = len(lobby_message) + 2
+            current_mentions.append(mention)
+            current_length += added_length
+        if current_mentions:
+            mention_chunks.append(" ".join(current_mentions))
+
+        allowed_mentions = discord.AllowedMentions(
+            everyone=False,
+            roles=False,
+            users=True,
+            replied_user=False,
+        )
+        summary = (
+            f"{lobby_message}\n\n{mention_chunks[0]}\n\n"
+            f"*Checked {target_channel.mention}: {len(eligible_members)} available, "
+            f"{excluded_count} already playing.*"
+        )
+        await interaction.response.send_message(
+            summary,
+            allowed_mentions=allowed_mentions,
+        )
+        for chunk in mention_chunks[1:]:
+            await interaction.followup.send(
+                chunk,
+                allowed_mentions=allowed_mentions,
+            )
+
+    @app_commands.command(
         name="rank-players",
         description="Shows active-season players under a specific ProAvalon rank.",
     )
