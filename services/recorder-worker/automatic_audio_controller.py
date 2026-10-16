@@ -30,6 +30,15 @@ class ActiveRecording:
     postgame_deadline: float | None = None
 
 
+class RecorderRequestError(RuntimeError):
+    def __init__(self, status: int, detail: object | None = None) -> None:
+        self.status = status
+        self.detail = detail
+        super().__init__(
+            f"HTTP {status}" + (f": {detail}" if detail is not None else "")
+        )
+
+
 class Controller:
     def __init__(self) -> None:
         load_dotenv()
@@ -45,6 +54,7 @@ class Controller:
         self.craig_data_dir = Path(os.getenv("CRAIG_DATA_DIR", "../craig-data")).resolve()
         self.output_dir = Path(os.getenv("AUDIO_OUTPUT_DIR", "recordings")).resolve()
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.active_state_path = self.output_dir / "active-craig-recording.json"
         self.video_dir = Path(os.getenv("VIDEO_OUTPUT_DIR", "../browser-recordings")).resolve()
         self.final_dir = Path(os.getenv("FINAL_OUTPUT_DIR", "final-recordings")).resolve()
         self.final_dir.mkdir(parents=True, exist_ok=True)
@@ -124,10 +134,7 @@ class Controller:
                 data = {"error": await response.text()}
             if response.status >= 400:
                 detail = data.get("error") or data.get("code")
-                raise RuntimeError(
-                    f"HTTP {response.status}"
-                    + (f": {detail}" if detail is not None else "")
-                )
+                raise RecorderRequestError(response.status, detail)
             return data
 
     async def snapshot(self):
@@ -205,6 +212,108 @@ class Controller:
                     candidates.append((len(overlap), room_id, players, int(channel["channel_id"])))
         return max(candidates, default=None)
 
+    def persist_active_recording(self, recording: ActiveRecording) -> None:
+        state = {
+            "room_id": recording.room_id,
+            "players": recording.players,
+            "channel_id": recording.channel_id,
+            "recording_id": recording.recording_id,
+            "access_key": recording.access_key,
+            "started_at": recording.started_at,
+        }
+        temporary = self.active_state_path.with_suffix(".tmp")
+        temporary.write_text(json.dumps(state, indent=2), encoding="utf-8")
+        temporary.replace(self.active_state_path)
+
+    def read_active_recording(self) -> ActiveRecording | None:
+        if not self.active_state_path.is_file():
+            return None
+        try:
+            state = json.loads(self.active_state_path.read_text(encoding="utf-8"))
+            return ActiveRecording(
+                room_id=int(state["room_id"]),
+                players=[str(name) for name in state.get("players") or []],
+                channel_id=int(state["channel_id"]),
+                recording_id=str(state["recording_id"]),
+                access_key=str(state["access_key"]),
+                started_at=float(state["started_at"]),
+            )
+        except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError) as error:
+            print(f"Ignoring invalid persisted Craig session state: {error}")
+            return None
+
+    def clear_active_recording_state(self) -> None:
+        self.active_state_path.unlink(missing_ok=True)
+        self.active_state_path.with_suffix(".tmp").unlink(missing_ok=True)
+
+    async def recover_craig_conflict(self, candidate) -> bool:
+        """Adopt a known session, or discard an untracked Craig orphan."""
+        _, room_id, players, channel_id = candidate
+        status = await self.request(
+            "GET",
+            f"{self.control_url}/recordings/{self.guild_id}",
+        )
+        if not status.get("active"):
+            # The conflicting session ended between the 409 and this check.
+            self.clear_active_recording_state()
+            return False
+
+        persisted = self.read_active_recording()
+        status_recording_id = str(status.get("id") or "")
+        try:
+            status_channel_id = int(status.get("channelId"))
+        except (TypeError, ValueError):
+            status_channel_id = 0
+
+        if (
+            persisted is not None
+            and persisted.recording_id == status_recording_id
+            and persisted.room_id == room_id
+            and persisted.channel_id == channel_id == status_channel_id
+        ):
+            # Refresh the roster from the current live snapshot in case the
+            # process restarted after the session file was written.
+            persisted.players = players
+            self.active = persisted
+            self.persist_active_recording(persisted)
+            print(
+                f"Recovered active Craig recording {persisted.recording_id} "
+                f"for room {room_id} after recorder-worker restart."
+            )
+            await self.audit(
+                room_id,
+                "voice_recording_recovered",
+                f"Craig recording {persisted.recording_id} was adopted after restart.",
+            )
+            return True
+
+        stale_room_id = persisted.room_id if persisted is not None else None
+        stale_recording_id = status_recording_id or "unknown"
+        print(
+            f"Craig recording {stale_recording_id} is active but is not tracked "
+            "by this recorder-worker; discarding the orphaned session."
+        )
+        await self.request(
+            "POST",
+            f"{self.control_url}/recordings/stop",
+            json={"guildId": str(self.guild_id), "discard": True},
+        )
+        self.clear_active_recording_state()
+        removed = (
+            self.discard_room_media(stale_room_id)
+            if stale_room_id is not None
+            else 0
+        )
+        await self.audit(
+            stale_room_id or room_id,
+            "voice_orphan_discarded",
+            (
+                f"Discarded untracked Craig recording {stale_recording_id}; "
+                f"deleted {removed} bytes of recorder-worker media."
+            ),
+        )
+        return False
+
     async def start(self, candidate, payload):
         _, room_id, players, channel_id = candidate
         config = payload.get("recording_config") or {}
@@ -214,7 +323,21 @@ class Controller:
         }
         if config.get("output_channel_id"):
             body["postChannelId"] = str(config["output_channel_id"])
-        result = await self.request("POST", f"{self.control_url}/recordings/start", json=body)
+        try:
+            result = await self.request(
+                "POST", f"{self.control_url}/recordings/start", json=body
+            )
+        except RecorderRequestError as error:
+            if error.status != 409:
+                raise
+            if await self.recover_craig_conflict(candidate):
+                return
+            # Craig has finished deleting the orphan at this point. Retry the
+            # intended room once in the same tick instead of entering a 409 loop.
+            await asyncio.sleep(0.5)
+            result = await self.request(
+                "POST", f"{self.control_url}/recordings/start", json=body
+            )
         if not result.get("id") or not result.get("accessKey"):
             raise RuntimeError(
                 "Craig started without returning recording metadata; redeploy "
@@ -232,6 +355,7 @@ class Controller:
                 else time.time()
             ),
         )
+        self.persist_active_recording(self.active)
         print(f"Recording room {room_id} in Discord voice channel {channel_id}.")
         await self.audit(
             room_id,
@@ -248,6 +372,7 @@ class Controller:
             json={"guildId": str(self.guild_id), "discard": discard},
         )
         self.active = None
+        self.clear_active_recording_state()
         if discard:
             print(f"Discarded abandoned room {current.room_id}.")
             await self.audit(current.room_id, "voice_recording_discarded")
