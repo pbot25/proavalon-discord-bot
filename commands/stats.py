@@ -78,6 +78,27 @@ SOCIAL_LIST_CHOICES = [
 ]
 
 
+HISTORY_ROLE_CHOICES = [
+    app_commands.Choice(name=name, value=value)
+    for name, value in (
+        ("Resistance", "resistance"),
+        ("Tristan", "tristan"),
+        ("Isolde", "isolde"),
+        ("Percival", "percival"),
+        ("Merlin", "merlin"),
+        ("Melron", "melron"),
+        ("Moregano", "moregano"),
+        ("Spy", "spy"),
+        ("Assassin", "assassin"),
+        ("Morgana", "morgana"),
+        ("Mordred", "mordred"),
+        ("Oberon", "oberon"),
+        ("Hitberon", "hitberon"),
+        ("Mordred Assassin", "mordredassassin"),
+    )
+]
+
+
 class SocialListView(discord.ui.View):
     def __init__(
         self,
@@ -1276,6 +1297,122 @@ class StatsCommands(
 ):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
+
+    @app_commands.command(
+        name="history",
+        description="Shows a player's newest archived wins and losses.",
+    )
+    @app_commands.describe(
+        username="Registered player. Leave blank to use your linked account.",
+        discord_user="Linked Discord @ to look up.",
+        games="Number of recent qualifying games to show. Defaults to 10.",
+        role="Optionally show results only for one role.",
+    )
+    @app_commands.autocomplete(username=registered_username_autocomplete)
+    @app_commands.choices(role=HISTORY_ROLE_CHOICES)
+    async def history(
+        self,
+        interaction: discord.Interaction,
+        username: str | None = None,
+        discord_user: discord.Member | None = None,
+        games: app_commands.Range[int, 1, 250] = 10,
+        role: app_commands.Choice[str] | None = None,
+    ) -> None:
+        if interaction.guild_id is None:
+            await interaction.response.send_message(
+                "This command can only be used in a server.", ephemeral=True
+            )
+            return
+
+        season = await get_active_season(interaction.guild_id)
+        if season is None:
+            await interaction.response.send_message(
+                "No community season is currently active.", ephemeral=True
+            )
+            return
+
+        requested, error = await resolve_stats_target(
+            interaction, season, username=username, discord_user=discord_user
+        )
+        if error is not None:
+            await interaction.response.send_message(error, ephemeral=True)
+            return
+
+        resolved = await resolve_registered_username(
+            season_id=int(season["id"]), requested_username=requested
+        )
+        if resolved is None:
+            await interaction.response.send_message(
+                f"`{requested}` is not registered for {season_display_name(season)}.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer(thinking=True)
+        archived_matches = await get_season_matches(int(season["id"]))
+        role_filter = role.value.casefold() if role is not None else None
+        results: list[bool] = []
+
+        # Stored matches are oldest-first. Reverse them so the icons read from
+        # the newest result to the oldest result.
+        for match in reversed(archived_matches):
+            participant = next(
+                (
+                    item for item in match.participants
+                    if item.username.casefold() == resolved.casefold()
+                ),
+                None,
+            )
+            if participant is None or participant.alignment is None:
+                continue
+            if role_filter is not None:
+                stored_role = str(participant.role or "").replace(" ", "").casefold()
+                if stored_role != role_filter:
+                    continue
+
+            winner = str(match.winner or "").casefold()
+            winning_alignment = (
+                "Resistance" if "res" in winner
+                else "Spy" if "spy" in winner
+                else None
+            )
+            if winning_alignment is not None:
+                results.append(participant.alignment == winning_alignment)
+
+        selected = results[:int(games)]
+        if not selected:
+            role_text = f" as **{role.name}**" if role is not None else ""
+            await interaction.followup.send(
+                f"No archived results were found for `{resolved}`{role_text}.",
+                ephemeral=True,
+            )
+            return
+
+        wins = sum(selected)
+        losses = len(selected) - wins
+        win_rate = wins / len(selected) * 100
+        icons = ["✅" if won else "❌" for won in selected]
+        icon_lines = [
+            " ".join(icons[index:index + 25])
+            for index in range(0, len(icons), 25)
+        ]
+        scope = role.name if role is not None else "Overall"
+        embed = discord.Embed(
+            title=f"{resolved} — Recent History",
+            description=(
+                f"**{scope} • {len(selected)} most recent game(s)**\n"
+                + "\n".join(icon_lines)
+                + f"\n\n**{wins}W–{losses}L • {win_rate:.1f}% WR**"
+            ),
+            color=discord.Color.green() if wins >= losses else discord.Color.red(),
+        )
+        embed.set_footer(
+            text=(
+                f"{season_display_name(season)} • Newest → oldest • "
+                f"Showing {len(selected)} of {len(results)} qualifying game(s)"
+            )
+        )
+        await interaction.followup.send(embed=embed)
 
     @app_commands.command(
         name="player",

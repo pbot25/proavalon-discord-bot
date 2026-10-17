@@ -28,6 +28,7 @@ from database.ratings import (
 
 from database.account_links import (
     get_registered_players_with_links,
+    get_unlinked_registered_usernames,
 )
 
 from utils.permissions import bot_admin_only
@@ -1451,6 +1452,48 @@ class SeasonCommands(
             embed=view.build_embed(),
             view=view,
         )
+
+    @app_commands.command(
+        name="unlinked-players",
+        description="Shows active-season players without a linked Discord account.",
+    )
+    async def unlinked_players(
+        self,
+        interaction: discord.Interaction,
+    ) -> None:
+        if interaction.guild_id is None:
+            await interaction.response.send_message(
+                "This command can only be used in a server.", ephemeral=True
+            )
+            return
+
+        season = await get_active_season(interaction.guild_id)
+        if season is None:
+            await interaction.response.send_message(
+                "No community season is currently active.", ephemeral=True
+            )
+            return
+
+        usernames = await get_unlinked_registered_usernames(
+            interaction.guild_id, int(season["id"])
+        )
+        if not usernames:
+            await interaction.response.send_message(
+                f"Every player in {season_display_name(season)} is linked to a Discord account."
+            )
+            return
+
+        lines = [
+            f"`{index:>2}.` `{username}`"
+            for index, username in enumerate(usernames, start=1)
+        ]
+        view = RosterStatusView(
+            title=f"{season_display_name(season)} — Unlinked Players",
+            lines=lines,
+            footer_label=f"{len(usernames)} unlinked player(s)",
+            requesting_user_id=interaction.user.id,
+        )
+        await interaction.response.send_message(embed=view.build_embed(), view=view)
 
     @app_commands.command(
         name="void-list",
