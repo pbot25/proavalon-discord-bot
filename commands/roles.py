@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 
 import discord
 from discord import app_commands
@@ -74,6 +75,10 @@ VALID_BRACKETS = {
 }
 
 
+class RoleSyncRateLimited(RuntimeError):
+    """Stop an entire role reconciliation after Discord rejects one write."""
+
+
 class RoleSyncResult:
     def __init__(self) -> None:
         self.added = 0
@@ -123,6 +128,8 @@ class DiscordRoleCommands(
 ):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
+        self._sync_lock = asyncio.Lock()
+        self._role_sync_blocked_until = 0.0
         self.auto_sync.start()
 
     def cog_unload(self) -> None:
@@ -153,6 +160,17 @@ class DiscordRoleCommands(
             })
         except (discord.Forbidden, discord.HTTPException) as error:
             result.errors.append(f"Could not remove {role.name}: {error}")
+            if getattr(error, "status", None) == 429:
+                # Cloudflare 1015 responses do not carry Discord's normal
+                # rate-limit headers, so discord.py cannot safely wait and
+                # retry them. Continuing through every member/role turns one
+                # rejection into a request storm that can also block commands
+                # and match-history messages from this Railway service.
+                self._role_sync_blocked_until = time.monotonic() + 3600
+                raise RoleSyncRateLimited(
+                    "Discord rejected a role update; role syncing is paused "
+                    "for one hour."
+                ) from error
 
     async def _add_role_to_member(
         self,
@@ -173,6 +191,12 @@ class DiscordRoleCommands(
             })
         except (discord.Forbidden, discord.HTTPException) as error:
             result.errors.append(f"Could not add {role.name}: {error}")
+            if getattr(error, "status", None) == 429:
+                self._role_sync_blocked_until = time.monotonic() + 3600
+                raise RoleSyncRateLimited(
+                    "Discord rejected a role update; role syncing is paused "
+                    "for one hour."
+                ) from error
 
     async def _set_award_holders(
         self,
@@ -262,6 +286,30 @@ class DiscordRoleCommands(
             })
 
     async def sync_guild(self, guild: discord.Guild) -> RoleSyncResult:
+        """Serialize role writes and honor the global 429 circuit breaker."""
+        result = RoleSyncResult()
+        remaining = self._role_sync_blocked_until - time.monotonic()
+        if remaining > 0:
+            result.errors.append(
+                f"Role sync paused after a Discord rate limit "
+                f"({int(remaining) + 1}s remaining)."
+            )
+            return result
+
+        # The scheduled sync and post-match sync used to run concurrently,
+        # multiplying member and role requests. Queue one reconciliation at a
+        # time instead.
+        async with self._sync_lock:
+            remaining = self._role_sync_blocked_until - time.monotonic()
+            if remaining > 0:
+                result.errors.append(
+                    f"Role sync paused after a Discord rate limit "
+                    f"({int(remaining) + 1}s remaining)."
+                )
+                return result
+            return await self._sync_guild_unlocked(guild)
+
+    async def _sync_guild_unlocked(self, guild: discord.Guild) -> RoleSyncResult:
         result = RoleSyncResult()
         configs = await get_role_configs(guild.id)
         if not configs:

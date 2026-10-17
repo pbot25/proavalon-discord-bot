@@ -548,21 +548,24 @@ class ProAvalonRatingTracker:
                     assassination_duration_seconds=shot_duration_seconds,
                 )
                 if match_id is not None:
-                    # Refresh Discord roles immediately after every newly archived
-                    # qualifying match. The 15-minute task remains only a backup.
-                    role_sync_result = await self._sync_roles_after_match(
-                        season, real_players
-                    )
+                    # Match history is the critical operation. Post it before
+                    # any optional role reconciliation so slow profile lookups
+                    # or a Discord role rate limit cannot hold the result (and
+                    # every later room) hostage.
                     await self._post_match(
                         season,
                         fingerprint,
                         data,
                         changes,
-                        role_sync_result,
+                        None,
                         game_duration_seconds=game_duration_seconds,
                         shot_duration_seconds=shot_duration_seconds,
                         match_id=match_id,
                     )
+                    # Refresh roles only after the match is safely posted. The
+                    # 15-minute task remains a backup if this attempt is paused
+                    # by the role-sync circuit breaker.
+                    await self._sync_roles_after_match(season, real_players)
             self._tracked.pop(room_id, None)
             self._room_rosters.pop(room_id, None)
             self._game_started_at.pop(room_id, None)
