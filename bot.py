@@ -1,3 +1,4 @@
+import asyncio
 import os
 
 import discord
@@ -96,27 +97,49 @@ class ProAvalonBot(commands.Bot):
         await super().close()
 
 
-bot = ProAvalonBot()
+def create_bot() -> ProAvalonBot:
+    bot = ProAvalonBot()
 
+    @bot.event
+    async def on_ready() -> None:
+        print(f"Logged into Discord as {bot.user}", flush=True)
 
-@bot.event
-async def on_ready() -> None:
-    print(f"Logged into Discord as {bot.user}")
-
-
-@bot.tree.command(
-    name="ping",
-    description="Checks whether the bot is online.",
-)
-async def ping(
-    interaction: discord.Interaction,
-) -> None:
-    latency = round(bot.latency * 1000)
-
-    await interaction.response.send_message(
-        f"🏓 ProAvalon Stats is online. "
-        f"Latency: {latency} ms."
+    @bot.tree.command(
+        name="ping",
+        description="Checks whether the bot is online.",
     )
+    async def ping(
+        interaction: discord.Interaction,
+    ) -> None:
+        latency = round(bot.latency * 1000)
+        await interaction.response.send_message(
+            f"🏓 ProAvalon Stats is online. Latency: {latency} ms."
+        )
+
+    return bot
 
 
-bot.run(DISCORD_TOKEN)
+async def run_bot_forever() -> None:
+    """Retry a Cloudflare-blocked Discord login without a crash loop."""
+    retry_delay = 10 * 60
+    while True:
+        bot = create_bot()
+        try:
+            async with bot:
+                await bot.start(DISCORD_TOKEN)
+            return
+        except discord.HTTPException as error:
+            if getattr(error, "status", None) != 429:
+                raise
+
+            print(
+                "Discord login is temporarily rate-limited. "
+                f"Keeping the service alive and retrying in "
+                f"{retry_delay // 60} minute(s).",
+                flush=True,
+            )
+            await asyncio.sleep(retry_delay)
+            retry_delay = min(retry_delay * 2, 60 * 60)
+
+
+asyncio.run(run_bot_forever())
