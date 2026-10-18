@@ -81,20 +81,16 @@ SOCIAL_LIST_CHOICES = [
 HISTORY_ROLE_CHOICES = [
     app_commands.Choice(name=name, value=value)
     for name, value in (
-        ("Resistance", "resistance"),
-        ("Tristan", "tristan"),
-        ("Isolde", "isolde"),
+        ("VT", "vt"),
+        ("Lover", "lover"),
         ("Percival", "percival"),
         ("Merlin", "merlin"),
-        ("Melron", "melron"),
-        ("Moregano", "moregano"),
-        ("Spy", "spy"),
         ("Assassin", "assassin"),
         ("Morgana", "morgana"),
         ("Mordred", "mordred"),
         ("Oberon", "oberon"),
-        ("Hitberon", "hitberon"),
-        ("Mordred Assassin", "mordredassassin"),
+        ("Overall Resistance", "overall-resistance"),
+        ("Overall Spy", "overall-spy"),
     )
 ]
 
@@ -1367,7 +1363,18 @@ class StatsCommands(
                 continue
             if role_filter is not None:
                 stored_role = str(participant.role or "").replace(" ", "").casefold()
-                if stored_role != role_filter:
+                role_matches = (
+                    participant.alignment == "Resistance"
+                    if role_filter == "overall-resistance"
+                    else participant.alignment == "Spy"
+                    if role_filter == "overall-spy"
+                    else stored_role == "resistance"
+                    if role_filter == "vt"
+                    else stored_role in {"tristan", "isolde"}
+                    if role_filter == "lover"
+                    else stored_role == role_filter
+                )
+                if not role_matches:
                     continue
 
             winner = str(match.winner or "").casefold()
@@ -1438,16 +1445,6 @@ class StatsCommands(
             for value in (username, discord_user, discord_user_id)
         )
 
-        if provided_methods == 0:
-            await interaction.response.send_message(
-                (
-                    "Provide either a ProAvalon username or a "
-                    "linked Discord user."
-                ),
-                ephemeral=True,
-            )
-            return
-
         if provided_methods > 1:
             await interaction.response.send_message(
                 "Choose only one lookup method: `username`, `discord_user`, or `discord_user_id`.",
@@ -1461,7 +1458,37 @@ class StatsCommands(
             else None
         )
 
-        if discord_user is not None or discord_user_id is not None:
+        if provided_methods == 0:
+            if interaction.guild_id is None:
+                await interaction.response.send_message(
+                    "Use this command in a server, or provide a username.",
+                    ephemeral=True,
+                )
+                return
+            if active_season is None:
+                await interaction.response.send_message(
+                    "No community season is currently active.",
+                    ephemeral=True,
+                )
+                return
+
+            link = await get_preferred_link_for_discord(
+                interaction.guild_id,
+                interaction.user.id,
+                int(active_season["season_number"]),
+            )
+            if link is None:
+                await interaction.response.send_message(
+                    (
+                        f"{interaction.user.mention} is not linked to an account "
+                        f"for {season_display_name(active_season)}."
+                    ),
+                    ephemeral=True,
+                )
+                return
+            clean_username = str(link["proavalon_username"]).strip()
+
+        elif discord_user is not None or discord_user_id is not None:
             if interaction.guild_id is None:
                 await interaction.response.send_message(
                     (
