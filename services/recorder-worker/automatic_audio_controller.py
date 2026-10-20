@@ -758,6 +758,10 @@ class Controller:
                     and "user has exceeded the number of videos"
                     in error_text.casefold()
                 )
+                youtube_authorization_unavailable = (
+                    "youtube authorization could not be refreshed"
+                    in error_text.casefold()
+                )
                 source_missing = (
                     isinstance(error, RecorderRequestError)
                     and error.status == 404
@@ -808,6 +812,11 @@ class Controller:
                         self.cleanup_recording_media(metadata)
                     elif quota_exhausted or channel_upload_limited or (
                         persistent_attempts >= self.upload_max_attempts
+                        and (
+                            not youtube_authorization_unavailable
+                            or time.time() - completed_at
+                            >= self.orphan_retention_seconds
+                        )
                     ):
                         cleanup_error = None
                         if metadata.get("delete_key"):
@@ -822,7 +831,11 @@ class Controller:
                         reason = (
                             "youtube_limit"
                             if quota_exhausted or channel_upload_limited
-                            else "upload_failed"
+                            else (
+                                "youtube_auth_expired"
+                                if youtube_authorization_unavailable
+                                else "upload_failed"
+                            )
                         )
                         self.cleanup_completed_recording(
                             metadata_path, metadata, reason=reason
