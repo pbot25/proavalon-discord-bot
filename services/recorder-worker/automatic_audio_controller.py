@@ -25,6 +25,7 @@ class ActiveRecording:
     channel_id: int
     recording_id: str
     access_key: str
+    delete_key: str
     started_at: float
     invalid_since: float | None = None
     postgame_deadline: float | None = None
@@ -219,6 +220,7 @@ class Controller:
             "channel_id": recording.channel_id,
             "recording_id": recording.recording_id,
             "access_key": recording.access_key,
+            "delete_key": recording.delete_key,
             "started_at": recording.started_at,
         }
         temporary = self.active_state_path.with_suffix(".tmp")
@@ -236,6 +238,7 @@ class Controller:
                 channel_id=int(state["channel_id"]),
                 recording_id=str(state["recording_id"]),
                 access_key=str(state["access_key"]),
+                delete_key=str(state.get("delete_key") or ""),
                 started_at=float(state["started_at"]),
             )
         except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError) as error:
@@ -349,6 +352,7 @@ class Controller:
             channel_id=channel_id,
             recording_id=result["id"],
             access_key=result["accessKey"],
+            delete_key=str(result.get("deleteKey") or ""),
             started_at=(
                 datetime.fromisoformat(str(result["startedAt"]).replace("Z", "+00:00")).timestamp()
                 if result.get("startedAt")
@@ -404,12 +408,23 @@ class Controller:
         return removed_bytes
 
     async def _prepare_audio_handoff(self, current: ActiveRecording, result: dict):
+        # Craig can acknowledge a stop before its asynchronous control response
+        # contains the recording metadata. The start response is already
+        # persisted, so use it as the authoritative fallback instead of losing
+        # the completed handoff with KeyError('id').
+        recording_id = str(result.get("id") or current.recording_id)
+        access_key = str(result.get("accessKey") or current.access_key)
+        delete_key = str(result.get("deleteKey") or current.delete_key)
+        if not recording_id or not access_key:
+            raise RuntimeError(
+                f"Craig stopped room {current.room_id} without recording metadata."
+            )
         metadata = {
             "room_id": current.room_id,
             "discord_voice_channel_id": current.channel_id,
-            "recording_id": result["id"],
-            "access_key": result["accessKey"],
-            "delete_key": result["deleteKey"],
+            "recording_id": recording_id,
+            "access_key": access_key,
+            "delete_key": delete_key,
             "completed_at": time.time(),
             "voice_started_at": current.started_at,
         }
@@ -743,6 +758,36 @@ class Controller:
                     and "user has exceeded the number of videos"
                     in error_text.casefold()
                 )
+                source_missing = (
+                    isinstance(error, RecorderRequestError)
+                    and error.status == 404
+                    and "recording not found" in error_text.casefold()
+                )
+                completed_at = float(metadata.get("completed_at") or time.time())
+                expired_before_upload = (
+                    not upload_attempted
+                    and attempts >= self.upload_max_attempts
+                    and time.time() - completed_at >= self.incomplete_retention_seconds
+                )
+                if source_missing or expired_before_upload:
+                    reason = "craig_source_missing" if source_missing else "handoff_expired"
+                    detail = (
+                        error_text
+                        or "Craig audio handoff repeatedly failed without an error message."
+                    )
+                    self.cleanup_completed_recording(
+                        metadata_path, metadata, reason=reason
+                    )
+                    self.handoff_retry_at.pop(metadata_path, None)
+                    self.handoff_attempts.pop(metadata_path, None)
+                    print(
+                        f"Discarded stale room {room_id} handoff: {detail}"
+                    )
+                    if room_id is not None:
+                        await self.audit(
+                            room_id, "incomplete_media_discarded", detail
+                        )
+                    return
                 if upload_attempted:
                     persistent_attempts = int(metadata.get("upload_failure_attempts") or 0) + 1
                     metadata["upload_failure_attempts"] = persistent_attempts
