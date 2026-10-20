@@ -763,7 +763,16 @@ class Controller:
                     and error.status == 404
                     and "recording not found" in error_text.casefold()
                 )
-                completed_at = float(metadata.get("completed_at") or time.time())
+                try:
+                    # Legacy handoff files may predate the completed_at field.
+                    # Their file timestamp is the best available age signal;
+                    # defaulting to the current time would make them immortal.
+                    completed_at = float(
+                        metadata.get("completed_at")
+                        or metadata_path.stat().st_mtime
+                    )
+                except (OSError, TypeError, ValueError):
+                    completed_at = time.time()
                 expired_before_upload = (
                     not upload_attempted
                     and attempts >= self.upload_max_attempts
