@@ -1,5 +1,6 @@
 import asyncio
 from datetime import datetime, timezone
+from io import BytesIO
 import math
 
 import discord
@@ -7,6 +8,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from database.account_links import get_preferred_link_for_discord
+from database.matches import get_player_rating_history
 from database.known_players import get_known_proavalon_usernames
 from database.ratings import get_cached_rating
 from database.voting_metrics import get_player_voting_metrics
@@ -19,12 +21,14 @@ from database.social_stats import (
 
 from database.seasons import (
     get_active_season,
+    get_season_by_number,
     get_season_players,
     is_season_player_voided,
     register_season_player,
     season_display_name,
 )
 from utils.discord_users import parse_discord_user_id
+from proavalon.rating_chart import build_rating_history_png
 from proavalon.profile_scraper import (
     PlayerProfile,
     ProAvalonError,
@@ -1293,6 +1297,98 @@ class StatsCommands(
 ):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
+
+    @app_commands.command(
+        name="rating-graph",
+        description="Graphs a player's rating after each tracked match in a season.",
+    )
+    @app_commands.describe(
+        season_number="Community season number, for example 4.",
+        username="ProAvalon username to look up.",
+        discord_user_id="Discord user ID linked to the ProAvalon account.",
+    )
+    async def rating_graph(
+        self,
+        interaction: discord.Interaction,
+        season_number: app_commands.Range[int, 1, 999],
+        username: str | None = None,
+        discord_user_id: str | None = None,
+    ) -> None:
+        if interaction.guild_id is None:
+            await interaction.response.send_message(
+                "This command can only be used in a server.", ephemeral=True
+            )
+            return
+        username = username.strip() if username is not None else None
+        if not username and not discord_user_id:
+            await interaction.response.send_message(
+                "Provide `username` or `discord_user_id`.", ephemeral=True
+            )
+            return
+        if username and discord_user_id:
+            await interaction.response.send_message(
+                "Choose either a ProAvalon username or a Discord ID.",
+                ephemeral=True,
+            )
+            return
+
+        if username:
+            target_username = username
+        else:
+            try:
+                target_id = parse_discord_user_id(str(discord_user_id))
+            except ValueError as error:
+                await interaction.response.send_message(str(error), ephemeral=True)
+                return
+
+        await interaction.response.defer(thinking=True)
+        season = await get_season_by_number(
+            interaction.guild_id, int(season_number)
+        )
+        if season is None:
+            await interaction.followup.send(
+                f"Community Season {season_number} was not found in this server.",
+                ephemeral=True,
+            )
+            return
+
+        if not username:
+            link = await get_preferred_link_for_discord(
+                interaction.guild_id,
+                target_id,
+                int(season["season_number"]),
+            )
+            if link is None:
+                await interaction.followup.send(
+                    f"Discord ID `{target_id}` has no linked ProAvalon account "
+                    f"for this server.",
+                    ephemeral=True,
+                )
+                return
+            target_username = str(link["proavalon_username"]).strip()
+
+        history = await get_player_rating_history(
+            int(season["id"]), target_username
+        )
+        chart = build_rating_history_png(history, target_username)
+        if chart is None:
+            await interaction.followup.send(
+                f"No post-match ratings were archived for `{target_username}` in "
+                f"{season_display_name(season)}.",
+                ephemeral=True,
+            )
+            return
+
+        first, last = history[0], history[-1]
+        caption = (
+            f"{season_display_name(season)} • {len(history)} tracked games\n"
+            f"Game 1 (match #{first['match_id']}): **{first['rating']:,}** → "
+            f"Game {len(history)} (match #{last['match_id']}): **{last['rating']:,}**"
+        )
+        await interaction.followup.send(
+            content=caption,
+            file=discord.File(BytesIO(chart), filename="rating-history.png"),
+        )
 
     @app_commands.command(
         name="history",

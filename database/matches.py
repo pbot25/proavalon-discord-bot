@@ -208,6 +208,61 @@ async def get_match_for_recording(guild_id:int,room_id:int):
         c=await db.execute("SELECT sm.*, COALESCE(NULLIF(TRIM(cs.display_name), ''), 'ProAvalon') AS season_display_name FROM season_matches sm JOIN community_seasons cs ON cs.id=sm.community_season_id WHERE cs.guild_id=? AND sm.room_id=? ORDER BY sm.finished_at DESC,sm.id DESC LIMIT 1",(str(guild_id),room_id)); return await c.fetchone()
     finally: await db.close()
 
+
+async def get_player_rating_history(season_id: int, username: str):
+    """Return this player's post-match ratings in season match order."""
+    db = await connect()
+    try:
+        cursor = await db.execute(
+            """
+            SELECT season_match_id, finished_at, rating_changes_json
+            FROM season_matches
+            WHERE community_season_id = ?
+              AND season_match_id IS NOT NULL
+            ORDER BY season_match_id ASC, id ASC
+            """,
+            (int(season_id),),
+        )
+        rows = await cursor.fetchall()
+    finally:
+        await db.close()
+
+    target = username.strip().casefold()
+    history = []
+    for row in rows:
+        raw_changes = row["rating_changes_json"]
+        if not raw_changes:
+            continue
+        try:
+            changes = json.loads(raw_changes)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        if not isinstance(changes, list):
+            continue
+
+        for change in changes:
+            if not isinstance(change, dict):
+                continue
+            player = change.get("username")
+            after = change.get("after")
+            if not isinstance(player, str) or player.strip().casefold() != target:
+                continue
+            if isinstance(after, bool):
+                continue
+            try:
+                rating = int(after)
+            except (TypeError, ValueError):
+                continue
+            history.append(
+                {
+                    "match_id": row["season_match_id"],
+                    "finished_at": row["finished_at"],
+                    "rating": rating,
+                }
+            )
+            break
+    return history
+
 async def set_recording_status(match_database_id:int,status:str):
     db=await connect()
     try:
