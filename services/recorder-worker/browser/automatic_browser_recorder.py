@@ -335,6 +335,7 @@ class LobbyWatcher:
         self.rosters: dict[int, list[str]] = {}
         self.ten_player_breaks: dict[int, int] = {}
         self.finished_rooms: set[int] = set()
+        self.voided_rooms: set[int] = set()
         self.current_room: int | None = None
         self.connected = asyncio.Event()
         self.changed = asyncio.Event()
@@ -494,6 +495,7 @@ class LobbyWatcher:
                     maximum != 10
                     or game.get("passwordLocked", False)
                     or status == "finished"
+                    or room_id in self.voided_rooms
                     or (status == "game in progress" and not is_preferred)
                     or room_id in inspected
                 ):
@@ -525,6 +527,7 @@ class LobbyWatcher:
                     # visible Finished status, while the room's final
                     # game-data payload reliably carries phase=finished.
                     self.finished_rooms.discard(room_id)
+                    self.voided_rooms.discard(room_id)
                     self.current_room = room_id
                     await self.emit("join-room", room_id)
                     return (
@@ -548,11 +551,15 @@ class LobbyWatcher:
     def room_finished(self, room_id: int) -> bool:
         return room_id in self.finished_rooms
 
+    def room_voided(self, room_id: int) -> bool:
+        return room_id in self.voided_rooms
+
     async def release_room(self, room_id: int) -> None:
         if self.current_room == room_id:
             await self.emit("leave-room", "")
             self.current_room = None
         self.finished_rooms.discard(room_id)
+        self.voided_rooms.discard(room_id)
 
     def remained_at_ten(self, room_id: int, break_token: int) -> bool:
         game = self.games.get(room_id)
@@ -683,8 +690,12 @@ class LobbyWatcher:
                             room_id = int(event_data.get("roomId"))
                         except (TypeError, ValueError):
                             continue
-                        if str(event_data.get("phase") or "").casefold() == "finished":
+                        phase = str(event_data.get("phase") or "").casefold()
+                        if phase == "finished":
                             self.finished_rooms.add(room_id)
+                            self.changed.set()
+                        elif phase == "voided":
+                            self.voided_rooms.add(room_id)
                             self.changed.set()
 
 
@@ -694,6 +705,7 @@ class BrowserGameMonitor:
     def __init__(self) -> None:
         self.games: dict[int, dict] = {}
         self.finished_rooms: set[int] = set()
+        self.voided_rooms: set[int] = set()
         self.changed = asyncio.Event()
         self.received_game_list = False
 
@@ -731,8 +743,12 @@ class BrowserGameMonitor:
                 room_id = int(event_data.get("roomId"))
             except (TypeError, ValueError):
                 return
-            if str(event_data.get("phase") or "").casefold() == "finished":
+            phase = str(event_data.get("phase") or "").casefold()
+            if phase == "finished":
                 self.finished_rooms.add(room_id)
+                self.changed.set()
+            elif phase == "voided":
+                self.voided_rooms.add(room_id)
                 self.changed.set()
 
     def seed_game(self, room_id: int, game: dict) -> None:
@@ -744,6 +760,9 @@ class BrowserGameMonitor:
 
     def room_finished(self, room_id: int) -> bool:
         return room_id in self.finished_rooms
+
+    def room_voided(self, room_id: int) -> bool:
+        return room_id in self.voided_rooms
 
     async def wait_until_observing(self, room_id: int, timeout: float = 10) -> None:
         deadline = time.monotonic() + timeout
@@ -1003,6 +1022,16 @@ async def record_selected_room(
                 except (TypeError, ValueError):
                     count = None
                 status = str(game.get("status") or "").casefold()
+                if browser_monitor.room_voided(room_id):
+                    print(
+                        f"Room {room_id} was voided on ProAvalon; discarding "
+                        "the browser recording immediately."
+                    )
+                    if bridge is not None:
+                        await bridge.audit(room_id, "browser_game_voided")
+                    lifecycle.state = SessionState.ABANDONED
+                    state = lifecycle.state
+                    break
                 state = lifecycle.update(
                     now=time.monotonic(),
                     room_present=present,

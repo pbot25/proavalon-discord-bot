@@ -379,9 +379,12 @@ class ProAvalonRatingTracker:
         """Return the public lobby state needed by an external recorder."""
         snapshot = []
         for room_id, game in self._games.items():
+            tracked = self._tracked.get(room_id) or {}
+            live_data = tracked.get("last_data") or {}
             snapshot.append({
                 "room_id": int(room_id),
                 "status": str(game.get("status") or ""),
+                "phase": str(live_data.get("phase") or ""),
                 "player_count": game.get("numOfPlayersInside"),
                 "max_players": game.get("maxNumPlayers"),
                 "password_locked": bool(game.get("passwordLocked", False)),

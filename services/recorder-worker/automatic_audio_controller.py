@@ -193,12 +193,14 @@ class Controller:
                 room_id = int(lobby["room_id"])
                 players = [str(name) for name in lobby.get("players") or []]
                 status = str(lobby.get("status") or "").casefold()
+                phase = str(lobby.get("phase") or "").casefold()
             except (KeyError, TypeError, ValueError):
                 continue
             if (
                 room_id == exclude_room
                 or room_id in cancelled_rooms
                 or status != "game in progress"
+                or phase == "voided"
                 or len(players) != 10
             ):
                 continue
@@ -1118,9 +1120,24 @@ class Controller:
         lobby = next((item for item in payload.get("lobbies") or [] if int(item.get("room_id", -1)) == current.room_id), None)
         now = time.monotonic()
         status = str((lobby or {}).get("status") or "").casefold()
+        phase = str((lobby or {}).get("phase") or "").casefold()
         archived = current.room_id in {
             int(room_id) for room_id in payload.get("archived_room_ids") or []
         }
+        if phase == "voided":
+            room_id = current.room_id
+            await self.stop(discard=True)
+            removed = self.discard_room_media(room_id)
+            await self.audit(
+                room_id,
+                "voice_game_voided",
+                f"Deleted {removed} bytes of recorder-worker media.",
+            )
+            print(
+                f"Room {room_id} was voided on ProAvalon; Craig and "
+                f"{removed / (1024**2):.1f} MiB of media were discarded."
+            )
+            return
         if (status == "finished" or archived) and current.postgame_deadline is None:
             current.postgame_deadline = now + 30
             current.invalid_since = None
