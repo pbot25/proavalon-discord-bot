@@ -35,7 +35,7 @@ def build_rating_history_png(history: list[dict], username: str) -> bytes | None
         return None
 
     width, height = 1000, 520
-    left, right, top, bottom = 88, 36, 64, 82
+    left, right, top, bottom = 150, 36, 64, 82
     plot_w, plot_h = width - left - right, height - top - bottom
     image = Image.new("RGB", (width, height), "white")
     draw = ImageDraw.Draw(image)
@@ -48,9 +48,8 @@ def build_rating_history_png(history: list[dict], username: str) -> bytes | None
     ratings = [point[1] for point in points]
     min_x, max_x = min(game_numbers), max(game_numbers)
     min_rating, max_rating = min(ratings), max(ratings)
-    spread = max_rating - min_rating
-    padding = max(50, math.ceil(spread * 0.15))
-    low_y, high_y = min_rating - padding, max_rating + padding
+    low_y = min(1000, min_rating - 50)
+    high_y = max(2000, math.ceil((max_rating + 50) / 100) * 100)
     if high_y == low_y:
         high_y += 1
 
@@ -59,12 +58,30 @@ def build_rating_history_png(history: list[dict], username: str) -> bytes | None
         y = top + (high_y - rating) / (high_y - low_y) * plot_h
         return x, y
 
-    # Five horizontal guides keep the chart readable without adding clutter.
-    for index in range(5):
-        value = high_y - (high_y - low_y) * index / 4
-        y = top + plot_h * index / 4
-        draw.line((left, y, width - right, y), fill="#e5e8ec", width=1)
-        draw.text((8, y - 8), f"{value:,.0f}", fill="#59616b", font=tick_font)
+    # Mark ProAvalon's rank cutoffs so rating changes have rank context.
+    rating_guides = [
+        (1000, "1,000"),
+        (1300, "Bronze · 1,300"),
+        (1400, "Silver · 1,400"),
+        (1550, "Gold · 1,550"),
+        (1700, "Platinum · 1,700"),
+        (1800, "Diamond · 1,800"),
+        (1900, "Champion · 1,900"),
+    ]
+    if high_y > 2000:
+        rating_guides.append((high_y, f"{high_y:,.0f}"))
+    for value, label in rating_guides:
+        if value < low_y or value > high_y:
+            continue
+        y = top + (high_y - value) / (high_y - low_y) * plot_h
+        draw.line((left, y, width - right, y), fill="#dfe4ea", width=1)
+        text_height = draw.textbbox((0, 0), label, font=tick_font)[3]
+        draw.text(
+            (4, y - text_height / 2),
+            label,
+            fill="#59616b",
+            font=tick_font,
+        )
 
     draw.line((left, top, left, top + plot_h), fill="#626b75", width=2)
     draw.line((left, top + plot_h, width - right, top + plot_h), fill="#626b75", width=2)
