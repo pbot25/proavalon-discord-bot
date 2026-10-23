@@ -151,7 +151,6 @@ def build_rating_history_png(
         fill="#353b43",
         font=label_font,
     )
-    draw.text((left, height - 25), f"{len(points)} games played", fill="#59616b", font=label_font)
 
     output = BytesIO()
     image.save(output, format="PNG", optimize=True)
