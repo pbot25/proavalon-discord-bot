@@ -1381,7 +1381,7 @@ class StatsCommands(
 
         first, last = history[0], history[-1]
         caption = (
-            f"{season_display_name(season)} • {len(history)} tracked games\n"
+            f"{season_display_name(season)} • {len(history)} games played\n"
             f"Game 1 (match #{first['match_id']}): **{first['rating']:,}** → "
             f"Game {len(history)} (match #{last['match_id']}): **{last['rating']:,}**"
         )

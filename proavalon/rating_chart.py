@@ -141,8 +141,15 @@ def build_rating_history_png(history: list[dict], username: str) -> bytes | None
             fill="#59616b",
             font=tick_font,
         )
-    draw.text((left + plot_w / 2 - 75, height - 25), "Player's tracked game number", fill="#353b43", font=label_font)
-    draw.text((left, height - 25), f"{len(points)} tracked games", fill="#59616b", font=label_font)
+    x_label = "Games played in season"
+    x_label_width = draw.textbbox((0, 0), x_label, font=label_font)[2]
+    draw.text(
+        (left + (plot_w - x_label_width) / 2, height - 25),
+        x_label,
+        fill="#353b43",
+        font=label_font,
+    )
+    draw.text((left, height - 25), f"{len(points)} games played", fill="#59616b", font=label_font)
 
     output = BytesIO()
     image.save(output, format="PNG", optimize=True)
