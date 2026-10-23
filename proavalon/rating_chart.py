@@ -6,6 +6,17 @@ import math
 from PIL import Image, ImageDraw, ImageFont
 
 
+RATING_RANK_CUTOFFS = [
+    (0, "Iron"),
+    (1300, "Bronze"),
+    (1400, "Silver"),
+    (1550, "Gold"),
+    (1700, "Platinum"),
+    (1800, "Diamond"),
+    (1900, "Champion"),
+]
+
+
 def _font(size: int, bold: bool = False):
     candidates = [
         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
@@ -48,8 +59,23 @@ def build_rating_history_png(history: list[dict], username: str) -> bytes | None
     ratings = [point[1] for point in points]
     min_x, max_x = min(game_numbers), max(game_numbers)
     min_rating, max_rating = min(ratings), max(ratings)
-    low_y = min(1000, min_rating - 50)
-    high_y = max(2000, math.ceil((max_rating + 50) / 100) * 100)
+    lowest_rank_index = max(
+        index
+        for index, (cutoff, _) in enumerate(RATING_RANK_CUTOFFS)
+        if min_rating >= cutoff
+    )
+    highest_rank_index = max(
+        index
+        for index, (cutoff, _) in enumerate(RATING_RANK_CUTOFFS)
+        if max_rating >= cutoff
+    )
+    low_y = max(1000, RATING_RANK_CUTOFFS[lowest_rank_index][0])
+    if min_rating < low_y:
+        low_y = min_rating - 50
+    if highest_rank_index + 1 < len(RATING_RANK_CUTOFFS):
+        high_y = RATING_RANK_CUTOFFS[highest_rank_index + 1][0]
+    else:
+        high_y = math.ceil((max_rating + 100) / 100) * 100
     if high_y == low_y:
         high_y += 1
 
@@ -60,15 +86,13 @@ def build_rating_history_png(history: list[dict], username: str) -> bytes | None
 
     # Mark ProAvalon's rank cutoffs so rating changes have rank context.
     rating_guides = [
-        (1000, "1,000"),
-        (1300, "Bronze · 1,300"),
-        (1400, "Silver · 1,400"),
-        (1550, "Gold · 1,550"),
-        (1700, "Platinum · 1,700"),
-        (1800, "Diamond · 1,800"),
-        (1900, "Champion · 1,900"),
+        (cutoff, f"{rank} · {cutoff:,}")
+        for cutoff, rank in RATING_RANK_CUTOFFS
+        if low_y <= cutoff <= high_y
     ]
-    if high_y > 2000:
+    if low_y == 1000:
+        rating_guides.insert(0, (1000, "1,000"))
+    if high_y > RATING_RANK_CUTOFFS[-1][0]:
         rating_guides.append((high_y, f"{high_y:,.0f}"))
     for value, label in rating_guides:
         if value < low_y or value > high_y:
