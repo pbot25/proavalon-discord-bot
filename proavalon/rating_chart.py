@@ -69,17 +69,12 @@ def build_rating_history_png(history: list[dict], username: str) -> bytes | None
     draw.line((left, top, left, top + plot_h), fill="#626b75", width=2)
     draw.line((left, top + plot_h, width - right, top + plot_h), fill="#626b75", width=2)
     if len(points) > 1:
-        line_width = 4 if len(points) <= 60 else 2
+        line_width = 4 if len(points) <= 60 else 3
         draw.line(
             [xy(game_number, rating) for game_number, rating, _ in points],
             fill="#3978c5",
             width=line_width,
         )
-    marker_radius = 5 if len(points) <= 40 else 2
-    for game_number, rating, _ in points:
-        x, y = xy(game_number, rating)
-        radius = marker_radius
-        draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill="#3978c5", outline="white", width=2)
 
     # Use round tick intervals so long histories stay readable (for example,
     # every 20 games for a 150-game history), while preserving both endpoints.
