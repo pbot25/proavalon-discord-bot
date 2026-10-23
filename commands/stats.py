@@ -1370,7 +1370,9 @@ class StatsCommands(
         history = await get_player_rating_history(
             int(season["id"]), target_username
         )
-        chart = build_rating_history_png(history, target_username)
+        chart = build_rating_history_png(
+            history, target_username, season_display_name(season)
+        )
         if chart is None:
             await interaction.followup.send(
                 f"No post-match ratings were archived for `{target_username}` in "

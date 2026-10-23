@@ -32,7 +32,9 @@ def _font(size: int, bold: bool = False):
     return ImageFont.load_default()
 
 
-def build_rating_history_png(history: list[dict], username: str) -> bytes | None:
+def build_rating_history_png(
+    history: list[dict], username: str, season_name: str
+) -> bytes | None:
     """Render post-match rating values against season-local match numbers."""
     points = []
     for item in history:
@@ -53,7 +55,7 @@ def build_rating_history_png(history: list[dict], username: str) -> bytes | None
     title_font = _font(23, True)
     label_font = _font(14)
     tick_font = _font(12)
-    draw.text((left, 18), f"{username} — Rating Progression", fill="#20242b", font=title_font)
+    draw.text((left, 18), f"{username} — {season_name}", fill="#20242b", font=title_font)
 
     game_numbers = [point[0] for point in points]
     ratings = [point[1] for point in points]
@@ -141,7 +143,7 @@ def build_rating_history_png(history: list[dict], username: str) -> bytes | None
             fill="#59616b",
             font=tick_font,
         )
-    x_label = "Games played in season"
+    x_label = "Games played"
     x_label_width = draw.textbbox((0, 0), x_label, font=label_font)[2]
     draw.text(
         (left + (plot_w - x_label_width) / 2, height - 25),
