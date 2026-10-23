@@ -1371,7 +1371,7 @@ class StatsCommands(
             int(season["id"]), target_username
         )
         chart = build_rating_history_png(
-            history, target_username, season_display_name(season)
+            history, target_username, f"Season {season['season_number']}"
         )
         if chart is None:
             await interaction.followup.send(
