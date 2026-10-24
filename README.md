@@ -19,7 +19,6 @@ through Discord.
 - Match history with teams, roles, missions, voting history, and recordings
 - Paginated match search by one or more players
 - Historical player statistics across seasons
-- Custom player groups and group comparisons
 - Voice-channel lobby pings with optional custom messages
 - Identification of unregistered ProAvalon players
 - Configurable command, feedback, match-history, and recording channels
@@ -55,10 +54,10 @@ Pbot stores completed match data and exposes commands for:
 - Player and role performance
 - Recent win/loss history
 - Leaderboards and daily leaderboard posts
-- Best and worst teammates
-- Nemeses and most-dominated opponents
+- Best overall, Resistance, and Spy teammates
+- Most-dominated opponents
 - Match lookup by participating players
-- Season records, groups, and social comparisons
+- Season records and social comparisons
 
 When a YouTube recording is available, Pbot updates the existing match-history
 message with the video link while retaining the original voting chart.
@@ -268,7 +267,7 @@ worker to claim a simultaneous lobby without altering the first recorder.
 ## Data Storage
 
 Pbot uses SQLite on persistent storage for server configuration, seasons,
-account links, ratings, match history, recording audits, groups, and YouTube
+account links, ratings, match history, recording audits, and YouTube
 integration metadata. Craig uses Postgres and Redis for its own recording
 services. Railway volumes preserve application data across deployments.
 

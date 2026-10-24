@@ -101,6 +101,10 @@ class Controller:
             300,
             int(os.getenv("RECORDER_MAX_GAME_SECONDS", "5400")),
         )
+        self.craig_start_recovery_grace_seconds = max(
+            30,
+            int(os.getenv("RECORDER_CRAIG_START_RECOVERY_GRACE_SECONDS", "120")),
+        )
         # Craig's mixed export can omit a small amount of connection/setup
         # silence even though its startedAt timestamp includes that interval.
         # Keep timestamp alignment as the source of truth, then delay the
@@ -289,6 +293,60 @@ class Controller:
                 room_id,
                 "voice_recording_recovered",
                 f"Craig recording {persisted.recording_id} was adopted after restart.",
+            )
+            return True
+
+        # Craig may finish joining voice even when its shard response times
+        # out. In that case start() receives an error before it can persist
+        # the returned metadata, and the next start attempt receives a 409.
+        # A fresh recording in the requested channel is the session we just
+        # started, not an orphan. Adopt it instead of disconnecting Craig.
+        started_at = None
+        if status.get("startedAt"):
+            try:
+                started_at = datetime.fromisoformat(
+                    str(status["startedAt"]).replace("Z", "+00:00")
+                ).timestamp()
+            except (TypeError, ValueError):
+                pass
+        matching_fresh_start = (
+            status_channel_id == channel_id
+            and started_at is not None
+            and time.time() - started_at
+            <= self.craig_start_recovery_grace_seconds
+        )
+        if matching_fresh_start:
+            access_key = str(status.get("accessKey") or "")
+            if not status_recording_id or not access_key:
+                # Preserve the live recording while Craig is rolling out the
+                # richer status response. Retrying is safer than deleting a
+                # session that matches the room we are actively starting.
+                raise RuntimeError(
+                    "Craig started the requested voice recording but its "
+                    "recovery metadata is temporarily unavailable"
+                )
+            recovered = ActiveRecording(
+                room_id=room_id,
+                players=players,
+                channel_id=channel_id,
+                recording_id=status_recording_id,
+                access_key=access_key,
+                delete_key=str(status.get("deleteKey") or ""),
+                started_at=started_at,
+            )
+            self.active = recovered
+            self.persist_active_recording(recovered)
+            print(
+                f"Adopted Craig recording {status_recording_id} for room "
+                f"{room_id} after its start response timed out."
+            )
+            await self.audit(
+                room_id,
+                "voice_recording_start_recovered",
+                (
+                    f"Adopted Craig recording {status_recording_id} after "
+                    "the original start response was lost."
+                ),
             )
             return True
 
@@ -1124,7 +1182,7 @@ class Controller:
         archived = current.room_id in {
             int(room_id) for room_id in payload.get("archived_room_ids") or []
         }
-        if phase == "voided":
+        if status == "voided" or phase == "voided":
             room_id = current.room_id
             await self.stop(discard=True)
             removed = self.discard_room_media(room_id)

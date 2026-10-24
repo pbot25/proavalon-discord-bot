@@ -60,8 +60,12 @@ SOCIAL_LIST_CHOICES = [
         value="best-teammates",
     ),
     app_commands.Choice(
-        name="Worst Teammates",
-        value="worst-teammates",
+        name="Best Resistance Teammates",
+        value="best-resistance-teammates",
+    ),
+    app_commands.Choice(
+        name="Best Spy Teammates",
+        value="best-spy-teammates",
     ),
     app_commands.Choice(
         name="Rivals",
@@ -70,10 +74,6 @@ SOCIAL_LIST_CHOICES = [
     app_commands.Choice(
         name="Most Dominated",
         value="most-dominated",
-    ),
-    app_commands.Choice(
-        name="Nemeses",
-        value="nemeses",
     ),
 ]
 
@@ -1920,7 +1920,7 @@ class StatsCommands(
 
     @app_commands.command(
         name="list",
-        description="Lists teammates, rivals, nemeses, and dominated opponents.",
+        description="Lists teammates, rivals, and dominated opponents.",
     )
     @app_commands.describe(
         category="Which relationship list to show.",
@@ -2082,27 +2082,52 @@ class StatsCommands(
                 for index, row in enumerate(relationships, start=1)
             ]
 
-        elif category.value == "worst-teammates":
+        elif category.value == "best-resistance-teammates":
             relationships = [
                 row
                 for row in relationships
-                if int(row["same_games"]) >= minimum
+                if int(row["res_games"]) >= minimum
             ]
             relationships.sort(
                 key=lambda row: (
-                    float(row["same_win_rate"]),
-                    -int(row["same_games"]),
-                    -int(row["same_losses"]),
+                    -float(row["res_win_rate"]),
+                    -int(row["res_games"]),
+                    -int(row["res_wins"]),
                     str(row["username"]).casefold(),
                 )
             )
-            title = f"{resolved} — Worst Teammates"
+            title = f"{resolved} — Best Resistance Teammates"
             lines = [
                 (
                     f"**{index}.** `{row['username']}` — "
-                    f"**{float(row['same_win_rate']):.1f}% WR** "
-                    f"• {int(row['same_wins'])}W–{int(row['same_losses'])}L "
-                    f"• {int(row['same_games'])} games together"
+                    f"**{float(row['res_win_rate']):.1f}% WR** "
+                    f"• {int(row['res_wins'])}W–{int(row['res_losses'])}L "
+                    f"• {int(row['res_games'])} Resistance games together"
+                )
+                for index, row in enumerate(relationships, start=1)
+            ]
+
+        elif category.value == "best-spy-teammates":
+            relationships = [
+                row
+                for row in relationships
+                if int(row["spy_games"]) >= minimum
+            ]
+            relationships.sort(
+                key=lambda row: (
+                    -float(row["spy_win_rate"]),
+                    -int(row["spy_games"]),
+                    -int(row["spy_wins"]),
+                    str(row["username"]).casefold(),
+                )
+            )
+            title = f"{resolved} — Best Spy Teammates"
+            lines = [
+                (
+                    f"**{index}.** `{row['username']}` — "
+                    f"**{float(row['spy_win_rate']):.1f}% WR** "
+                    f"• {int(row['spy_wins'])}W–{int(row['spy_losses'])}L "
+                    f"• {int(row['spy_games'])} Spy games together"
                 )
                 for index, row in enumerate(relationships, start=1)
             ]
@@ -2151,32 +2176,6 @@ class StatsCommands(
                 (
                     f"**{index}.** `{row['username']}` — "
                     f"**{float(row['opponent_win_rate']):.1f}% WR** "
-                    f"• {int(row['opponent_wins'])}W–"
-                    f"{int(row['opponent_losses'])}L "
-                    f"• {int(row['opposite_games'])} opponent games"
-                )
-                for index, row in enumerate(relationships, start=1)
-            ]
-
-        else:
-            relationships = [
-                row
-                for row in relationships
-                if int(row["opposite_games"]) >= minimum
-            ]
-            relationships.sort(
-                key=lambda row: (
-                    float(row["opponent_win_rate"]),
-                    -int(row["opponent_losses"]),
-                    -int(row["opposite_games"]),
-                    str(row["username"]).casefold(),
-                )
-            )
-            title = f"{resolved} — Nemeses"
-            lines = [
-                (
-                    f"**{index}.** `{row['username']}` — "
-                    f"**{100.0 - float(row['opponent_win_rate']):.1f}% loss rate** "
                     f"• {int(row['opponent_wins'])}W–"
                     f"{int(row['opponent_losses'])}L "
                     f"• {int(row['opposite_games'])} opponent games"

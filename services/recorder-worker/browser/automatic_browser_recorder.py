@@ -656,6 +656,9 @@ class LobbyWatcher:
                             for game in event_data
                             if isinstance(game, dict) and game.get("roomId") is not None
                         }
+                        for room_id, game in updated_games.items():
+                            if str(game.get("status") or "").casefold() == "voided":
+                                self.voided_rooms.add(room_id)
                         for room_id, previous in previous_games.items():
                             try:
                                 was_ten = int(previous.get("numOfPlayersInside", 0)) == 10
@@ -737,6 +740,9 @@ class BrowserGameMonitor:
                 for game in event_data
                 if isinstance(game, dict) and game.get("roomId") is not None
             }
+            for room_id, game in self.games.items():
+                if str(game.get("status") or "").casefold() == "voided":
+                    self.voided_rooms.add(room_id)
             self.changed.set()
         elif event == "game-data" and isinstance(event_data, dict):
             try:
@@ -1022,7 +1028,11 @@ async def record_selected_room(
                 except (TypeError, ValueError):
                     count = None
                 status = str(game.get("status") or "").casefold()
-                if browser_monitor.room_voided(room_id):
+                if (
+                    status == "voided"
+                    or browser_monitor.room_voided(room_id)
+                    or watcher.room_voided(room_id)
+                ):
                     print(
                         f"Room {room_id} was voided on ProAvalon; discarding "
                         "the browser recording immediately."

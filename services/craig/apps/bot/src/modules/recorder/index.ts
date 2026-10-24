@@ -163,7 +163,20 @@ export default class RecorderModule extends BotModule {
   controlledStatus(guildID: string) {
     const recording = this.recordings.get(guildID);
     if (!recording) return { active: false };
-    return { active: true, id: recording.id, channelId: recording.channel.id, state: RecordingState[recording.state] };
+    // This endpoint is protected by BOT_CONTROL_TOKEN. Returning the same
+    // recovery metadata as startControlled lets recorder-worker adopt a
+    // recording when the shard completed the start but its HTTP response was
+    // lost or timed out. Without it, the worker can mistake that live session
+    // for an orphan and disconnect Craig from an active match.
+    return {
+      active: true,
+      id: recording.id,
+      channelId: recording.channel.id,
+      state: RecordingState[recording.state],
+      accessKey: recording.accessKey,
+      deleteKey: recording.deleteKey,
+      startedAt: recording.startedAt?.toISOString() ?? null
+    };
   }
 
   controlledSpeakers(guildID: string) {

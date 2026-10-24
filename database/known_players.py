@@ -17,7 +17,6 @@ async def get_known_proavalon_usernames(
     Sources:
     - current and archived community-season player rosters
     - active account links
-    - custom-group player rosters
 
     Results are deduplicated case-insensitively and sorted alphabetically.
     """
@@ -48,24 +47,10 @@ async def get_known_proavalon_usernames(
                 FROM account_links
                 WHERE account_links.guild_id = ?
                   AND account_links.is_active = 1
-
-                UNION
-
-                SELECT
-                    custom_group_players.proavalon_username
-                        AS proavalon_username
-                FROM custom_group_players
-
-                INNER JOIN custom_groups
-                    ON custom_groups.id =
-                        custom_group_players.custom_group_id
-
-                WHERE custom_groups.guild_id = ?
             )
             ORDER BY proavalon_username COLLATE NOCASE ASC
             """,
             (
-                _guild_id_text(guild_id),
                 _guild_id_text(guild_id),
                 _guild_id_text(guild_id),
             ),

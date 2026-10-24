@@ -126,45 +126,6 @@ ON season_voided_players (
     proavalon_username COLLATE NOCASE
 );
 
-CREATE TABLE IF NOT EXISTS custom_groups (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    guild_id TEXT NOT NULL,
-    name TEXT NOT NULL COLLATE NOCASE,
-    tracked_player_count INTEGER NOT NULL DEFAULT 10,
-    created_by_discord_user_id TEXT NOT NULL,
-    created_at TEXT NOT NULL
-);
-
-CREATE UNIQUE INDEX IF NOT EXISTS one_custom_group_name_per_guild
-ON custom_groups (
-    guild_id,
-    name COLLATE NOCASE
-);
-
-CREATE INDEX IF NOT EXISTS custom_groups_by_guild
-ON custom_groups(guild_id);
-
-CREATE TABLE IF NOT EXISTS custom_group_players (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    custom_group_id INTEGER NOT NULL,
-    proavalon_username TEXT NOT NULL COLLATE NOCASE,
-    added_by_discord_user_id TEXT NOT NULL,
-    added_at TEXT NOT NULL,
-    guild_id TEXT,
-    discord_user_id TEXT,
-
-    FOREIGN KEY (custom_group_id)
-        REFERENCES custom_groups(id)
-        ON DELETE CASCADE
-);
-
-CREATE UNIQUE INDEX IF NOT EXISTS one_player_per_custom_group
-ON custom_group_players (
-    custom_group_id,
-    proavalon_username COLLATE NOCASE
-);
-
-
 CREATE TABLE IF NOT EXISTS guild_settings (
     guild_id TEXT PRIMARY KEY,
     timezone TEXT NOT NULL,
