@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import math
 from collections import defaultdict
 from datetime import datetime, timezone, timedelta
+from statistics import mean, median
 from database.connection import connect
 
 RES_ROLES={"resistance","tristan","isolde","percival","merlin","melron","moregano"}
@@ -254,6 +256,74 @@ def activity_summary(rows,username,days=30):
         if dt>=cutoff: recent.append((row,p,w)); by_day[dt.strftime('%Y-%m-%d')]+=1
     busiest=max(by_day.items(), key=lambda kv:kv[1], default=(None,0))
     return {'games':len(recent),'wins':sum(1 for *_,w in recent if w),'days':days,'busiest_day':busiest[0],'busiest_count':busiest[1],'last':games[-1][0]['finished_at'] if games else None}
+
+
+def season_overview_summary(rows):
+    """Aggregate season outcomes, timing, and archive coverage."""
+    matches = list(rows)
+    resistance_wins = sum(
+        1 for row in matches if winner_norm(row["winner"]) == "Resistance"
+    )
+    spy_wins = sum(
+        1 for row in matches if winner_norm(row["winner"]) == "Spy"
+    )
+    known_results = resistance_wins + spy_wins
+
+    timed_matches = []
+    for row in matches:
+        try:
+            seconds = float(row["game_duration_seconds"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if seconds > 0 and math.isfinite(seconds):
+            timed_matches.append((seconds, row))
+
+    assassination_times = []
+    for row in matches:
+        try:
+            seconds = float(row["assassination_duration_seconds"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if seconds > 0 and math.isfinite(seconds):
+            assassination_times.append(seconds)
+
+    mission_counts = [
+        len(_j(row["mission_history_json"], []))
+        for row in matches
+    ]
+    youtube_matches = sum(
+        1 for row in matches if str(row["youtube_url"] or "").strip()
+    )
+
+    durations = [seconds for seconds, _ in timed_matches]
+    shortest = min(timed_matches, key=lambda item: item[0], default=None)
+    longest = max(timed_matches, key=lambda item: item[0], default=None)
+
+    return {
+        "matches": len(matches),
+        "known_results": known_results,
+        "unknown_results": len(matches) - known_results,
+        "resistance_wins": resistance_wins,
+        "spy_wins": spy_wins,
+        "resistance_win_rate": (
+            resistance_wins / known_results * 100 if known_results else 0.0
+        ),
+        "spy_win_rate": spy_wins / known_results * 100 if known_results else 0.0,
+        "timed_matches": len(timed_matches),
+        "average_duration_seconds": mean(durations) if durations else None,
+        "median_duration_seconds": median(durations) if durations else None,
+        "total_duration_seconds": sum(durations) if durations else None,
+        "shortest_duration_seconds": shortest[0] if shortest else None,
+        "shortest_match_id": shortest[1]["season_match_id"] if shortest else None,
+        "longest_duration_seconds": longest[0] if longest else None,
+        "longest_match_id": longest[1]["season_match_id"] if longest else None,
+        "average_assassination_seconds": (
+            mean(assassination_times) if assassination_times else None
+        ),
+        "timed_assassinations": len(assassination_times),
+        "average_missions": mean(mission_counts) if mission_counts else None,
+        "youtube_matches": youtube_matches,
+    }
 
 def relationships(rows,username):
     target=username.casefold(); d=defaultdict(lambda:{'shared':0,'same':0,'opp':0,'opp_wins':0,'opp_losses':0})

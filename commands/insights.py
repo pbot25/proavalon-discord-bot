@@ -7,7 +7,7 @@ import re
 import discord
 from discord import app_commands
 from discord.ext import commands
-from database.insights import active_or_latest,season_rows,recent_rows,find_match,registered_usernames,all_links_for_discord,bot_status_data,unpack,player_summary,streak_summary,role_summary,alignment_summary,role_board,activity_summary,season_records,ratings_for_usernames,relationships,season_match_player_names,season_player_discord_links,search_matches_by_players
+from database.insights import active_or_latest,season_rows,recent_rows,find_match,registered_usernames,all_links_for_discord,bot_status_data,unpack,player_summary,streak_summary,role_summary,alignment_summary,role_board,activity_summary,season_records,season_overview_summary,ratings_for_usernames,relationships,season_match_player_names,season_player_discord_links,search_matches_by_players
 from utils.permissions import bot_admin_only
 from database.account_links import get_preferred_link_for_discord
 from utils.discord_users import parse_discord_user_id
@@ -20,6 +20,17 @@ def fmt_date(v):
     if not v: return 'N/A'
     try: return datetime.fromisoformat(str(v).replace('Z','+00:00')).strftime('%b %d, %Y')
     except Exception: return str(v)[:10]
+
+
+def fmt_duration(seconds):
+    if seconds is None:
+        return "N/A"
+    total = max(0, int(round(float(seconds))))
+    hours, remainder = divmod(total, 3600)
+    minutes, remaining_seconds = divmod(remainder, 60)
+    if hours:
+        return f"{hours}h {minutes}m {remaining_seconds}s"
+    return f"{minutes}m {remaining_seconds}s"
 
 async def player_auto(interaction,current):
     if interaction.guild_id is None: return []
@@ -631,8 +642,7 @@ class PastSeason(commands.GroupCog, group_name="past-season", group_description=
 
         rows = await season_rows(season["id"])
         names = {p["username"].casefold(): p["username"] for row in rows for p in unpack(row)}
-        res_wins = sum(1 for row in rows if str(row["winner"] or "").casefold().startswith("res"))
-        spy_wins = sum(1 for row in rows if str(row["winner"] or "").casefold().startswith("spy"))
+        summary = season_overview_summary(rows)
         status = "Active" if season["is_active"] else "Archived"
 
         e = discord.Embed(
@@ -642,8 +652,82 @@ class PastSeason(commands.GroupCog, group_name="past-season", group_description=
         e.add_field(name="Status", value=status, inline=True)
         e.add_field(name="Matches", value=str(len(rows)), inline=True)
         e.add_field(name="Players Seen", value=str(len(names)), inline=True)
-        e.add_field(name="Resistance Wins", value=str(res_wins), inline=True)
-        e.add_field(name="Spy Wins", value=str(spy_wins), inline=True)
+        result_lines = [
+            (
+                f"**Resistance:** {summary['resistance_wins']:,} wins • "
+                f"**{summary['resistance_win_rate']:.1f}%**"
+            ),
+            (
+                f"**Spies:** {summary['spy_wins']:,} wins • "
+                f"**{summary['spy_win_rate']:.1f}%**"
+            ),
+        ]
+        if summary["unknown_results"]:
+            result_lines.append(
+                f"Unknown/unresolved results: **{summary['unknown_results']:,}**"
+            )
+        e.add_field(
+            name="Season Results",
+            value="\n".join(result_lines),
+            inline=False,
+        )
+
+        def timed_match_line(label, seconds, match_id):
+            if seconds is None:
+                return f"**{label}:** N/A"
+            match_suffix = f" • Match #{match_id}" if match_id is not None else ""
+            return f"**{label}:** {fmt_duration(seconds)}{match_suffix}"
+
+        e.add_field(
+            name="Game Lengths",
+            value=(
+                f"**Average:** {fmt_duration(summary['average_duration_seconds'])}\n"
+                f"**Median:** {fmt_duration(summary['median_duration_seconds'])}\n"
+                + timed_match_line(
+                    "Shortest",
+                    summary["shortest_duration_seconds"],
+                    summary["shortest_match_id"],
+                )
+                + "\n"
+                + timed_match_line(
+                    "Longest",
+                    summary["longest_duration_seconds"],
+                    summary["longest_match_id"],
+                )
+                + "\n"
+                f"**Total recorded play time:** "
+                f"{fmt_duration(summary['total_duration_seconds'])}\n"
+                f"Duration data: **{summary['timed_matches']:,}/{summary['matches']:,} matches**"
+            ),
+            inline=False,
+        )
+
+        assassination_text = (
+            f"{fmt_duration(summary['average_assassination_seconds'])} "
+            f"({summary['timed_assassinations']:,} timed)"
+            if summary["average_assassination_seconds"] is not None
+            else "N/A"
+        )
+        youtube_rate = (
+            summary["youtube_matches"] / summary["matches"] * 100
+            if summary["matches"]
+            else 0.0
+        )
+        e.add_field(
+            name="Additional Season Data",
+            value=(
+                f"**Average missions:** "
+                f"{summary['average_missions']:.2f}\n"
+                if summary["average_missions"] is not None
+                else "**Average missions:** N/A\n"
+            )
+            + (
+                f"**Average assassination phase:** {assassination_text}\n"
+                f"**YouTube recordings:** {summary['youtube_matches']:,}/"
+                f"{summary['matches']:,} ({youtube_rate:.1f}%)"
+            ),
+            inline=False,
+        )
         e.add_field(name="Started", value=fmt_date(season["started_at"]), inline=True)
         e.add_field(name="Ended", value=fmt_date(season["ended_at"]) if season["ended_at"] else "Still active", inline=True)
         await interaction.response.send_message(embed=e)

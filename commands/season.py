@@ -15,6 +15,7 @@ from database.seasons import (
     get_active_season,
     get_latest_season,
     get_season_players,
+    get_viewable_season,
     get_voided_season_players,
     reset_all_season_data,
     unvoid_season_player,
@@ -48,6 +49,7 @@ from database.season_archives import (
     unmount_season_archive,
     unload_current_season,
 )
+from database.insights import season_overview_summary, season_rows
 
 
 RANK_CHOICES = [
@@ -73,6 +75,17 @@ RANK_EMOJIS = {
 }
 
 STATUS_PAGE_SIZE = 15
+
+
+def format_season_duration(seconds) -> str:
+    if seconds is None:
+        return "N/A"
+    total = max(0, int(round(float(seconds))))
+    hours, remainder = divmod(total, 3600)
+    minutes, remaining_seconds = divmod(remainder, 60)
+    if hours:
+        return f"{hours}h {minutes}m {remaining_seconds}s"
+    return f"{minutes}m {remaining_seconds}s"
 
 
 class RosterStatusView(discord.ui.View):
@@ -1616,7 +1629,7 @@ class SeasonCommands(
 
     @app_commands.command(
         name="info",
-        description="Shows the active community season.",
+        description="Shows current-season configuration and overall statistics.",
     )
     async def info(
         self,
@@ -1629,13 +1642,13 @@ class SeasonCommands(
             )
             return
 
-        season = await get_active_season(
+        season = await get_viewable_season(
             interaction.guild_id
         )
 
         if season is None:
             await interaction.response.send_message(
-                "No community season is currently active."
+                "No active or temporarily mounted community season exists."
             )
             return
 
@@ -1645,6 +1658,11 @@ class SeasonCommands(
 
         embed = discord.Embed(
             title=f"{season_display_name(season)}",
+            description=(
+                "**Temporary read-only archive view**"
+                if int(season["is_mounted"] or 0) == 1
+                else "**Active season**"
+            ),
             color=discord.Color.blurple(),
         )
 
@@ -1680,6 +1698,81 @@ class SeasonCommands(
             name="Started",
             value=season["started_at"][:10],
             inline=True,
+        )
+
+        rows = await season_rows(int(season["id"]))
+        summary = season_overview_summary(rows)
+        result_lines = [
+            (
+                f"**Resistance:** {summary['resistance_wins']:,} wins • "
+                f"**{summary['resistance_win_rate']:.1f}%**"
+            ),
+            (
+                f"**Spies:** {summary['spy_wins']:,} wins • "
+                f"**{summary['spy_win_rate']:.1f}%**"
+            ),
+        ]
+        if summary["unknown_results"]:
+            result_lines.append(
+                f"Unknown/unresolved: **{summary['unknown_results']:,}**"
+            )
+        embed.add_field(
+            name=f"Season Results • {summary['matches']:,} matches",
+            value="\n".join(result_lines),
+            inline=False,
+        )
+
+        shortest_match = (
+            f" • Match #{summary['shortest_match_id']}"
+            if summary["shortest_match_id"] is not None
+            else ""
+        )
+        longest_match = (
+            f" • Match #{summary['longest_match_id']}"
+            if summary["longest_match_id"] is not None
+            else ""
+        )
+        embed.add_field(
+            name="Game Lengths",
+            value=(
+                f"**Average:** {format_season_duration(summary['average_duration_seconds'])}\n"
+                f"**Median:** {format_season_duration(summary['median_duration_seconds'])}\n"
+                f"**Shortest:** "
+                f"{format_season_duration(summary['shortest_duration_seconds'])}"
+                f"{shortest_match}\n"
+                f"**Longest:** "
+                f"{format_season_duration(summary['longest_duration_seconds'])}"
+                f"{longest_match}\n"
+                f"**Total play time:** "
+                f"{format_season_duration(summary['total_duration_seconds'])}\n"
+                f"Duration coverage: **{summary['timed_matches']:,}/"
+                f"{summary['matches']:,} matches**"
+            ),
+            inline=False,
+        )
+
+        youtube_rate = (
+            summary["youtube_matches"] / summary["matches"] * 100
+            if summary["matches"]
+            else 0.0
+        )
+        average_missions = (
+            f"{summary['average_missions']:.2f}"
+            if summary["average_missions"] is not None
+            else "N/A"
+        )
+        assassination_time = format_season_duration(
+            summary["average_assassination_seconds"]
+        )
+        embed.add_field(
+            name="Additional Season Data",
+            value=(
+                f"**Average missions:** {average_missions}\n"
+                f"**Average assassination phase:** {assassination_time}\n"
+                f"**YouTube recordings:** {summary['youtube_matches']:,}/"
+                f"{summary['matches']:,} ({youtube_rate:.1f}%)"
+            ),
+            inline=False,
         )
 
         await interaction.response.send_message(embed=embed)
