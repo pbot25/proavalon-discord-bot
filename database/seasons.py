@@ -86,6 +86,35 @@ async def get_active_season(
         await database.close()
 
 
+async def get_viewable_season(
+    guild_id: int,
+):
+    """Return the live season, or a deliberately mounted read-only archive."""
+    database = await connect()
+    await _ensure_season_display_name_column(database)
+
+    try:
+        cursor = await database.execute(
+            """
+            SELECT
+                season.*,
+                CASE WHEN mount.guild_id IS NULL THEN 0 ELSE 1 END AS is_mounted
+            FROM community_seasons season
+            LEFT JOIN season_archive_mounts mount
+              ON mount.community_season_id = season.id
+             AND mount.guild_id = season.guild_id
+            WHERE season.guild_id = ?
+              AND (season.is_active = 1 OR mount.guild_id IS NOT NULL)
+            ORDER BY season.is_active DESC, season.id DESC
+            LIMIT 1
+            """,
+            (_guild_id_text(guild_id),),
+        )
+        return await cursor.fetchone()
+    finally:
+        await database.close()
+
+
 async def get_season_by_number(
     guild_id: int,
     season_number: int,
@@ -246,6 +275,16 @@ async def create_season(
     await _ensure_season_display_name_column(database)
 
     try:
+        mount_cursor = await database.execute(
+            "SELECT 1 FROM season_archive_mounts WHERE guild_id = ? LIMIT 1",
+            (guild_text,),
+        )
+        if await mount_cursor.fetchone() is not None:
+            raise RuntimeError(
+                "Unmount the temporarily viewed season archive before creating "
+                "a new season."
+            )
+
         existing_cursor = await database.execute(
             """
             SELECT
@@ -314,10 +353,17 @@ async def create_season(
         next_cursor = await database.execute(
             """
             SELECT COALESCE(MAX(season_number), 0) + 1 AS next_number
-            FROM community_seasons
-            WHERE guild_id = ?
+            FROM (
+                SELECT season_number
+                FROM community_seasons
+                WHERE guild_id = ?
+                UNION ALL
+                SELECT season_number
+                FROM season_archive_exports
+                WHERE guild_id = ?
+            )
             """,
-            (guild_text,),
+            (guild_text, guild_text),
         )
         next_row = await next_cursor.fetchone()
         internal_number = int(next_row["next_number"])
@@ -817,6 +863,13 @@ async def reset_all_season_data(
         await database.execute(
             """
             DELETE FROM community_seasons
+            WHERE guild_id = ?
+            """,
+            (guild_text,),
+        )
+        await database.execute(
+            """
+            DELETE FROM season_archive_exports
             WHERE guild_id = ?
             """,
             (guild_text,),

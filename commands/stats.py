@@ -18,7 +18,7 @@ from database.social_stats import (
 )
 
 from database.seasons import (
-    get_active_season,
+    get_viewable_season,
     get_season_players,
     is_season_player_voided,
     register_season_player,
@@ -699,7 +699,7 @@ async def player_username_autocomplete(
         interaction.guild_id
     )
 
-    active_season = await get_active_season(
+    active_season = await get_viewable_season(
         interaction.guild_id
     )
 
@@ -742,7 +742,7 @@ async def registered_username_autocomplete(
     if interaction.guild_id is None:
         return []
 
-    season = await get_active_season(
+    season = await get_viewable_season(
         interaction.guild_id
     )
 
@@ -1320,7 +1320,7 @@ class StatsCommands(
             )
             return
 
-        season = await get_active_season(interaction.guild_id)
+        season = await get_viewable_season(interaction.guild_id)
         if season is None:
             await interaction.response.send_message(
                 "No community season is currently active.", ephemeral=True
@@ -1453,7 +1453,7 @@ class StatsCommands(
             return
 
         active_season = (
-            await get_active_season(interaction.guild_id)
+            await get_viewable_season(interaction.guild_id)
             if interaction.guild_id is not None
             else None
         )
@@ -1638,10 +1638,19 @@ class StatsCommands(
                 )
 
                 if games_played >= 1:
-                    registered = await register_season_player(
-                        community_season_id=active_season["id"],
-                        proavalon_username=profile.username,
-                    )
+                    if int(active_season["is_mounted"] or 0) == 1:
+                        registered = (
+                            await resolve_registered_username(
+                                int(active_season["id"]),
+                                profile.username,
+                            )
+                            is not None
+                        )
+                    else:
+                        registered = await register_season_player(
+                            community_season_id=active_season["id"],
+                            proavalon_username=profile.username,
+                        )
 
                     # A voided username still works as a normal global
                     # /stats lookup, but it is not treated as part of the
@@ -1720,7 +1729,7 @@ class StatsCommands(
                 "This command can only be used in a server.", ephemeral=True
             )
             return
-        season = await get_active_season(interaction.guild_id)
+        season = await get_viewable_season(interaction.guild_id)
         if season is None:
             await interaction.response.send_message(
                 "No community season is currently active.", ephemeral=True
@@ -1810,7 +1819,7 @@ class StatsCommands(
             )
             return
 
-        season = await get_active_season(
+        season = await get_viewable_season(
             interaction.guild_id
         )
 
@@ -1952,7 +1961,7 @@ class StatsCommands(
             )
             return
 
-        season = await get_active_season(interaction.guild_id)
+        season = await get_viewable_season(interaction.guild_id)
         if season is None:
             await interaction.response.send_message(
                 "No community season is currently active.",
@@ -2218,7 +2227,7 @@ class StatsCommands(
             )
             return
 
-        season = await get_active_season(interaction.guild_id)
+        season = await get_viewable_season(interaction.guild_id)
         if season is None:
             await interaction.response.send_message(
                 "No community season is currently active.",
@@ -2304,7 +2313,7 @@ class StatsCommands(
             )
             return
 
-        season = await get_active_season(interaction.guild_id)
+        season = await get_viewable_season(interaction.guild_id)
         if season is None:
             await interaction.response.send_message(
                 "No community season is currently active.",

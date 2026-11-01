@@ -17,6 +17,7 @@ from database.leaderboard_profiles import (
 from database.voting_metrics import get_season_voting_metrics
 from database.seasons import (
     get_active_season,
+    get_viewable_season,
     get_season_players,
     season_display_name,
 )
@@ -1376,7 +1377,7 @@ class LeaderboardCommands(commands.Cog):
             return
 
         guild_id = interaction.guild_id
-        season = await get_active_season(guild_id)
+        season = await get_viewable_season(guild_id)
 
         if season is None:
             await interaction.response.send_message(

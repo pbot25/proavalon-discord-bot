@@ -13,6 +13,7 @@ from database.seasons import (
     rename_active_season,
     season_display_name,
     get_active_season,
+    get_latest_season,
     get_season_players,
     get_voided_season_players,
     reset_all_season_data,
@@ -36,6 +37,16 @@ from database.matches import (
     disable_match_channel,
     get_match_config,
     set_match_channel,
+)
+from database.season_archives import (
+    build_current_season_archive,
+    get_current_export_status,
+    get_mounted_season,
+    mount_prepared_season_archive,
+    prepare_season_archive_mount,
+    record_delivered_export,
+    unmount_season_archive,
+    unload_current_season,
 )
 
 
@@ -318,6 +329,277 @@ class EndSeasonView(discord.ui.View):
     async def on_timeout(self) -> None:
         for item in self.children:
             item.disabled = True
+
+
+class ExportSeasonView(discord.ui.View):
+    def __init__(self, requesting_user_id: int, season_name: str, guild_id: int) -> None:
+        super().__init__(timeout=60)
+        self.requesting_user_id = requesting_user_id
+        self.season_name = season_name
+        self.guild_id = guild_id
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.requesting_user_id:
+            await interaction.response.send_message(
+                "Only the administrator who started this confirmation can use it.",
+                ephemeral=True,
+            )
+            return False
+        return True
+
+    @discord.ui.button(label="Confirm Export", style=discord.ButtonStyle.primary)
+    async def confirm_export(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button,
+    ) -> None:
+        await interaction.response.edit_message(
+            content=f"Preparing the verified export for **{self.season_name}**…",
+            view=None,
+        )
+        self.stop()
+        archive = None
+        try:
+            archive = await build_current_season_archive(self.guild_id)
+            await interaction.followup.send(
+                (
+                    f"✅ **{archive.season_name} exported successfully.**\n"
+                    f"Matches: **{archive.row_counts['season_matches']:,}** • "
+                    f"Players: **{archive.row_counts['season_players']:,}** • "
+                    f"Account links: **{archive.row_counts['account_links']:,}**\n\n"
+                    "Download and keep this file somewhere safe. `/season unload` "
+                    "will only accept this exact snapshot."
+                ),
+                file=discord.File(str(archive.path), filename=archive.filename),
+                ephemeral=True,
+            )
+            await record_delivered_export(archive, interaction.user.id)
+            await interaction.edit_original_response(
+                content=(
+                    f"✅ **{archive.season_name}** was exported and delivered. "
+                    "Keep the attached archive safe before unloading the season."
+                )
+            )
+        except discord.HTTPException as error:
+            await interaction.edit_original_response(
+                content=(
+                    "❌ Discord could not deliver the export file, so it was not "
+                    f"approved for unloading. Details: `{error}`"
+                )
+            )
+        except Exception as error:
+            await interaction.edit_original_response(
+                content=f"❌ Season export failed: {error}"
+            )
+        finally:
+            if archive is not None:
+                archive.path.unlink(missing_ok=True)
+
+    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
+    async def cancel_export(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button,
+    ) -> None:
+        await interaction.response.edit_message(
+            content="Season export cancelled.", view=None
+        )
+        self.stop()
+
+
+class UnloadSeasonView(discord.ui.View):
+    def __init__(self, requesting_user_id: int, season_name: str, guild_id: int) -> None:
+        super().__init__(timeout=60)
+        self.requesting_user_id = requesting_user_id
+        self.season_name = season_name
+        self.guild_id = guild_id
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.requesting_user_id:
+            await interaction.response.send_message(
+                "Only the administrator who started this confirmation can use it.",
+                ephemeral=True,
+            )
+            return False
+        return True
+
+    @discord.ui.button(label="Unload Season", style=discord.ButtonStyle.danger)
+    async def confirm_unload(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button,
+    ) -> None:
+        await interaction.response.edit_message(
+            content=(
+                f"Verifying and unloading **{self.season_name}**… "
+                "This may take a moment while the database is compacted."
+            ),
+            view=None,
+        )
+        self.stop()
+        try:
+            result = await unload_current_season(self.guild_id)
+        except Exception as error:
+            await interaction.edit_original_response(
+                content=f"❌ Season unload stopped safely: {error}"
+            )
+            return
+
+        compact_message = (
+            "The database file was compacted to reclaim disk space."
+            if result.compacted
+            else (
+                "The season rows were removed, but database compaction could not "
+                "shrink the file; those pages remain available for SQLite to reuse."
+            )
+        )
+        await interaction.edit_original_response(
+            content=(
+                f"✅ **{result.season_name}** was unloaded.\n"
+                f"Removed **{result.row_counts['season_matches']:,} matches**, "
+                f"**{result.row_counts['season_players']:,} players**, and "
+                f"**{result.row_counts['account_links']:,} account links** from "
+                f"the live database. {compact_message}\n\n"
+                "The downloaded export is now the authoritative copy of this season."
+            )
+        )
+
+    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
+    async def cancel_unload(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button,
+    ) -> None:
+        await interaction.response.edit_message(
+            content="Season unload cancelled. No data was removed.", view=None
+        )
+        self.stop()
+
+
+class MountSeasonView(discord.ui.View):
+    def __init__(
+        self,
+        requesting_user_id: int,
+        guild_id: int,
+        prepared_archive,
+    ) -> None:
+        super().__init__(timeout=60)
+        self.requesting_user_id = requesting_user_id
+        self.guild_id = guild_id
+        self.prepared_archive = prepared_archive
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.requesting_user_id:
+            await interaction.response.send_message(
+                "Only the administrator who started this confirmation can use it.",
+                ephemeral=True,
+            )
+            return False
+        return True
+
+    @discord.ui.button(label="Mount Read-Only", style=discord.ButtonStyle.primary)
+    async def confirm_mount(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button,
+    ) -> None:
+        await interaction.response.edit_message(
+            content="Mounting and verifying the temporary season view…",
+            view=None,
+        )
+        self.stop()
+        try:
+            result = await mount_prepared_season_archive(
+                self.guild_id,
+                self.prepared_archive,
+                interaction.user.id,
+            )
+        except Exception as error:
+            await interaction.edit_original_response(
+                content=f"❌ Season mount stopped safely: {error}"
+            )
+            return
+
+        await interaction.edit_original_response(
+            content=(
+                f"✅ **{result.season_name}** is mounted for temporary viewing.\n"
+                f"Available data: **{result.row_counts['season_matches']:,} matches** "
+                f"and **{result.row_counts['season_players']:,} players**.\n\n"
+                "Stats, leaderboard, recent-match, and match-search commands can "
+                "now read this archive. Match tracking, recording, account changes, "
+                "and automatic posting remain disabled. Run `/season unmount` when done."
+            )
+        )
+
+    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
+    async def cancel_mount(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button,
+    ) -> None:
+        await interaction.response.edit_message(
+            content="Season mount cancelled.", view=None
+        )
+        self.stop()
+
+
+class UnmountSeasonView(discord.ui.View):
+    def __init__(self, requesting_user_id: int, guild_id: int, season_name: str) -> None:
+        super().__init__(timeout=60)
+        self.requesting_user_id = requesting_user_id
+        self.guild_id = guild_id
+        self.season_name = season_name
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.requesting_user_id:
+            await interaction.response.send_message(
+                "Only the administrator who started this confirmation can use it.",
+                ephemeral=True,
+            )
+            return False
+        return True
+
+    @discord.ui.button(label="Unmount Archive", style=discord.ButtonStyle.danger)
+    async def confirm_unmount(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button,
+    ) -> None:
+        await interaction.response.edit_message(
+            content=f"Removing the temporary **{self.season_name}** view…",
+            view=None,
+        )
+        self.stop()
+        try:
+            result = await unmount_season_archive(self.guild_id)
+        except Exception as error:
+            await interaction.edit_original_response(
+                content=f"❌ Season unmount failed: {error}"
+            )
+            return
+
+        compact_message = (
+            "Temporary disk space was reclaimed."
+            if result.compacted
+            else "The removed database pages remain available for SQLite to reuse."
+        )
+        await interaction.edit_original_response(
+            content=(
+                f"✅ **{result.season_name}** was unmounted. {compact_message}\n"
+                "Your downloaded archive file was not changed."
+            )
+        )
+
+    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
+    async def cancel_unmount(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button,
+    ) -> None:
+        await interaction.response.edit_message(
+            content="Season unmount cancelled.", view=None
+        )
+        self.stop()
 
 
 class ResetSeasonsView(discord.ui.View):
@@ -1469,8 +1751,10 @@ class SeasonCommands(
 
         season = await get_active_season(interaction.guild_id)
         if season is None:
+            season = await get_latest_season(interaction.guild_id)
+        if season is None:
             await interaction.response.send_message(
-                "No community season is currently active.", ephemeral=True
+                "This server has no community season to export.", ephemeral=True
             )
             return
 
@@ -1887,6 +2171,205 @@ class SeasonCommands(
                 "Season display name changed to "
                 f"**{season_display_name(season)}**."
             ),
+            ephemeral=True,
+        )
+
+    @app_commands.command(
+        name="export",
+        description="Exports the current season into a verified archive file.",
+    )
+    @bot_admin_only()
+    async def export_season(self, interaction: discord.Interaction) -> None:
+        if interaction.guild_id is None:
+            await interaction.response.send_message(
+                "This command can only be used in a server.", ephemeral=True
+            )
+            return
+
+        if await get_mounted_season(interaction.guild_id) is not None:
+            await interaction.response.send_message(
+                "Unmount the temporary archive before creating a new export.",
+                ephemeral=True,
+            )
+            return
+
+        season = await get_active_season(interaction.guild_id)
+        if season is None:
+            season = await get_latest_season(interaction.guild_id)
+        if season is None:
+            await interaction.response.send_message(
+                "This server has no community season to export.", ephemeral=True
+            )
+            return
+
+        season_name = season_display_name(season)
+        view = ExportSeasonView(
+            requesting_user_id=interaction.user.id,
+            season_name=season_name,
+            guild_id=interaction.guild_id,
+        )
+        await interaction.response.send_message(
+            (
+                f"Export **{season_name}** now?\n\n"
+                "The archive will contain the current season record, players, "
+                "void list, matches, roles, missions, votes, rating changes, "
+                "YouTube links, and season-scoped Discord account links. "
+                "Operational recording logs and global caches are excluded.\n\n"
+                "⚠️ The file contains Discord IDs and should be kept private."
+            ),
+            view=view,
+            ephemeral=True,
+        )
+
+    @app_commands.command(
+        name="unload",
+        description="Removes the current season after verifying its latest export.",
+    )
+    @bot_admin_only()
+    async def unload_season(self, interaction: discord.Interaction) -> None:
+        if interaction.guild_id is None:
+            await interaction.response.send_message(
+                "This command can only be used in a server.", ephemeral=True
+            )
+            return
+
+        if await get_mounted_season(interaction.guild_id) is not None:
+            await interaction.response.send_message(
+                "This season is already a temporary mounted copy. Use "
+                "`/season unmount` instead.",
+                ephemeral=True,
+            )
+            return
+
+        season = await get_active_season(interaction.guild_id)
+        if season is None:
+            season = await get_latest_season(interaction.guild_id)
+        if season is None:
+            await interaction.response.send_message(
+                "This server has no community season to unload.", ephemeral=True
+            )
+            return
+
+        export_status = await get_current_export_status(interaction.guild_id)
+        if export_status is None:
+            await interaction.response.send_message(
+                "The current season has no successfully delivered export. "
+                "Run `/season export` first.",
+                ephemeral=True,
+            )
+            return
+
+        season_name = season_display_name(season)
+        view = UnloadSeasonView(
+            requesting_user_id=interaction.user.id,
+            season_name=season_name,
+            guild_id=interaction.guild_id,
+        )
+        await interaction.response.send_message(
+            (
+                f"⚠️ **Permanently unload {season_name} from the live bot?**\n\n"
+                f"Verified export: `{export_status['archive_filename']}`\n\n"
+                "The bot will compare the current season against that exported "
+                "snapshot before deleting anything. If the season changed after "
+                "the export, unloading will stop and require a new export."
+            ),
+            view=view,
+            ephemeral=True,
+        )
+
+    @app_commands.command(
+        name="mount",
+        description="Temporarily mounts an unloaded season archive for viewing.",
+    )
+    @app_commands.describe(archive="The exact .db.zip file from /season export.")
+    @bot_admin_only()
+    async def mount_season(
+        self,
+        interaction: discord.Interaction,
+        archive: discord.Attachment,
+    ) -> None:
+        if interaction.guild_id is None:
+            await interaction.response.send_message(
+                "This command can only be used in a server.", ephemeral=True
+            )
+            return
+        if await get_active_season(interaction.guild_id) is not None:
+            await interaction.response.send_message(
+                "End or unload the active season before mounting an archive.",
+                ephemeral=True,
+            )
+            return
+        if await get_mounted_season(interaction.guild_id) is not None:
+            await interaction.response.send_message(
+                "A season archive is already mounted. Run `/season unmount` first.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer(thinking=True, ephemeral=True)
+        try:
+            archive_bytes = await archive.read(use_cached=True)
+            prepared = await prepare_season_archive_mount(
+                interaction.guild_id,
+                archive_bytes,
+                archive.filename,
+            )
+        except Exception as error:
+            await interaction.followup.send(
+                f"❌ That archive cannot be mounted: {error}", ephemeral=True
+            )
+            return
+
+        season_name = str(prepared.manifest["season_name"])
+        view = MountSeasonView(
+            requesting_user_id=interaction.user.id,
+            guild_id=interaction.guild_id,
+            prepared_archive=prepared,
+        )
+        await interaction.followup.send(
+            (
+                f"Mount **{season_name}** as a temporary read-only season view?\n\n"
+                f"Archive: `{prepared.filename}`\n"
+                f"Matches: **{prepared.manifest['row_counts']['season_matches']:,}** • "
+                f"Players: **{prepared.manifest['row_counts']['season_players']:,}**\n\n"
+                "This does not reactivate match tracking, recording, account "
+                "management, or automatic posts."
+            ),
+            view=view,
+            ephemeral=True,
+        )
+
+    @app_commands.command(
+        name="unmount",
+        description="Removes the temporary read-only season archive view.",
+    )
+    @bot_admin_only()
+    async def unmount_season(self, interaction: discord.Interaction) -> None:
+        if interaction.guild_id is None:
+            await interaction.response.send_message(
+                "This command can only be used in a server.", ephemeral=True
+            )
+            return
+        mounted = await get_mounted_season(interaction.guild_id)
+        if mounted is None:
+            await interaction.response.send_message(
+                "No season archive is currently mounted.", ephemeral=True
+            )
+            return
+
+        season_name = season_display_name(mounted)
+        view = UnmountSeasonView(
+            requesting_user_id=interaction.user.id,
+            guild_id=interaction.guild_id,
+            season_name=season_name,
+        )
+        await interaction.response.send_message(
+            (
+                f"Unmount the temporary **{season_name}** view?\n"
+                "This removes only the temporary imported copy. Your downloaded "
+                "archive remains unchanged."
+            ),
+            view=view,
             ephemeral=True,
         )
 
