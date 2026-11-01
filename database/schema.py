@@ -105,39 +105,6 @@ ON account_links (
 CREATE INDEX IF NOT EXISTS community_seasons_by_guild
 ON community_seasons(guild_id);
 
-CREATE TABLE IF NOT EXISTS season_archive_exports (
-    guild_id TEXT NOT NULL,
-    season_number INTEGER NOT NULL,
-    community_season_id INTEGER NOT NULL,
-    season_display_name TEXT NOT NULL,
-    snapshot_sha256 TEXT NOT NULL,
-    archive_sha256 TEXT NOT NULL,
-    archive_filename TEXT NOT NULL,
-    row_counts_json TEXT NOT NULL,
-    exported_at TEXT NOT NULL,
-    exported_by_discord_user_id TEXT NOT NULL,
-    delivered_at TEXT,
-    unloaded_at TEXT,
-
-    PRIMARY KEY (guild_id, season_number)
-);
-
-CREATE INDEX IF NOT EXISTS season_archive_exports_by_guild
-ON season_archive_exports(guild_id, exported_at);
-
-CREATE TABLE IF NOT EXISTS season_archive_mounts (
-    guild_id TEXT PRIMARY KEY,
-    community_season_id INTEGER NOT NULL UNIQUE,
-    season_number INTEGER NOT NULL,
-    archive_sha256 TEXT NOT NULL,
-    mounted_at TEXT NOT NULL,
-    mounted_by_discord_user_id TEXT NOT NULL,
-
-    FOREIGN KEY (community_season_id)
-        REFERENCES community_seasons(id)
-        ON DELETE CASCADE
-);
-
 
 
 

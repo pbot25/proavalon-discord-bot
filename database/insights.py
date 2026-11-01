@@ -70,6 +70,27 @@ async def season_match_player_names(season_id: int) -> list[str]:
     finally:
         await db.close()
 
+async def guild_match_player_names(guild_id: int) -> list[str]:
+    """Return distinct archived player names across every guild season."""
+    db = await connect()
+    try:
+        cur = await db.execute(
+            """
+            SELECT MIN(CAST(player.value AS TEXT)) AS username
+            FROM season_matches AS sm
+            JOIN community_seasons AS cs ON cs.id = sm.community_season_id
+            JOIN json_each(sm.players_json) AS player
+            WHERE cs.guild_id = ?
+              AND TRIM(CAST(player.value AS TEXT)) <> ''
+            GROUP BY LOWER(TRIM(CAST(player.value AS TEXT)))
+            ORDER BY username COLLATE NOCASE
+            """,
+            (str(guild_id),),
+        )
+        return [str(row["username"]) for row in await cur.fetchall()]
+    finally:
+        await db.close()
+
 async def season_player_discord_links(season_id: int):
     """Return active Discord links scoped to the selected season."""
     db = await connect()
@@ -113,6 +134,39 @@ async def search_matches_by_players(season_id: int, usernames: list[str]):
             ORDER BY sm.finished_at DESC, sm.id DESC
             """,
             (season_id, *keys, len(keys)),
+        )
+        return await cur.fetchall()
+    finally:
+        await db.close()
+
+async def search_guild_matches_by_players(guild_id: int, usernames: list[str]):
+    """Find matches across all guild seasons containing every supplied player."""
+    keys = list(dict.fromkeys(
+        name.strip().casefold() for name in usernames if name.strip()
+    ))
+    if not keys:
+        return []
+
+    placeholders = ",".join("?" for _ in keys)
+    db = await connect()
+    try:
+        cur = await db.execute(
+            f"""
+            SELECT sm.*,
+                   cs.season_number,
+                   cs.required_prefix AS season_prefix,
+                   COALESCE(NULLIF(TRIM(cs.display_name), ''),
+                            'Season ' || cs.season_number) AS season_display_name
+            FROM season_matches AS sm
+            JOIN community_seasons AS cs ON cs.id = sm.community_season_id
+            JOIN json_each(sm.players_json) AS player
+            WHERE cs.guild_id = ?
+              AND LOWER(TRIM(CAST(player.value AS TEXT))) IN ({placeholders})
+            GROUP BY sm.id
+            HAVING COUNT(DISTINCT LOWER(TRIM(CAST(player.value AS TEXT)))) = ?
+            ORDER BY sm.finished_at DESC, sm.id DESC
+            """,
+            (str(guild_id), *keys, len(keys)),
         )
         return await cur.fetchall()
     finally:

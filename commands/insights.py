@@ -7,7 +7,7 @@ import re
 import discord
 from discord import app_commands
 from discord.ext import commands
-from database.insights import active_or_latest,season_rows,recent_rows,find_match,registered_usernames,all_links_for_discord,bot_status_data,unpack,player_summary,streak_summary,role_summary,alignment_summary,role_board,activity_summary,season_records,season_overview_summary,ratings_for_usernames,relationships,season_match_player_names,season_player_discord_links,search_matches_by_players
+from database.insights import active_or_latest,season_rows,recent_rows,find_match,registered_usernames,all_links_for_discord,bot_status_data,unpack,player_summary,streak_summary,role_summary,alignment_summary,role_board,activity_summary,season_records,season_overview_summary,ratings_for_usernames,relationships,season_match_player_names,season_player_discord_links,search_matches_by_players,guild_match_player_names,search_guild_matches_by_players
 from utils.permissions import bot_admin_only
 from database.account_links import get_preferred_link_for_discord
 from utils.discord_users import parse_discord_user_id
@@ -61,10 +61,9 @@ def _compact_match_value(row) -> str:
 
 
 class MatchSearchView(discord.ui.View):
-    def __init__(self, *, rows, season, searched_names, requesting_user_id: int):
+    def __init__(self, *, rows, searched_names, requesting_user_id: int):
         super().__init__(timeout=180)
         self.rows = list(rows)
-        self.season = season
         self.searched_names = searched_names
         self.requesting_user_id = requesting_user_id
         self.page = 0
@@ -88,7 +87,7 @@ class MatchSearchView(discord.ui.View):
         start = self.page * MATCH_SEARCH_PAGE_SIZE
         page_rows = self.rows[start:start + MATCH_SEARCH_PAGE_SIZE]
         embed = discord.Embed(
-            title=f"{season_display_name(self.season)} — Match Search",
+            title="All Seasons — Match Search",
             description=(
                 f"**Players:** {', '.join(f'`{name}`' for name in self.searched_names)}\n"
                 f"**{len(self.rows)} matching match{'es' if len(self.rows) != 1 else ''}**"
@@ -99,7 +98,8 @@ class MatchSearchView(discord.ui.View):
             winner = str(row["winner"] or "Unknown")
             embed.add_field(
                 name=(
-                    f"#{row['season_match_id']} • {winner} win • "
+                    f"{row['season_display_name']} • #{row['season_match_id']} • "
+                    f"{winner} win • "
                     f"{fmt_date(row['finished_at'])}"
                 ),
                 value=_compact_match_value(row),
@@ -130,16 +130,7 @@ class MatchSearchView(discord.ui.View):
 async def match_search_autocomplete(interaction: discord.Interaction, current: str):
     if interaction.guild_id is None:
         return []
-    season = await active_or_latest(interaction.guild_id)
-    if not season:
-        return []
-    names = await season_match_player_names(int(season["id"]))
-    linked_rows = await season_player_discord_links(int(season["id"]))
-    linked_ids = {
-        str(row["proavalon_username"]).casefold(): row["discord_user_id"]
-        for row in linked_rows
-        if row["discord_user_id"]
-    }
+    names = await guild_match_player_names(interaction.guild_id)
     selected = {
         str(getattr(interaction.namespace, f"player_{index}", "") or "")
         .strip()
@@ -152,16 +143,8 @@ async def match_search_autocomplete(interaction: discord.Interaction, current: s
         key = name.casefold()
         if key in selected and key != current.strip().casefold():
             continue
-        member = None
-        discord_id = linked_ids.get(key)
-        if discord_id and interaction.guild is not None:
-            member = interaction.guild.get_member(int(discord_id))
-        discord_terms = ""
         choice_name = name
-        if member is not None:
-            discord_terms = f"{member.name} {member.display_name}".casefold()
-            choice_name = f"{name} — @{member.display_name}"
-        if query and query not in key and query not in discord_terms:
+        if query and query not in key:
             continue
         choices.append(app_commands.Choice(name=choice_name[:100], value=name))
         if len(choices) == 25:
@@ -287,7 +270,7 @@ class Insights(commands.Cog):
             )
 
         await interaction.response.defer(thinking=True)
-        archived_names = await season_match_player_names(int(season["id"]))
+        archived_names = await guild_match_player_names(interaction.guild_id)
         canonical = {name.casefold(): name for name in archived_names}
         resolved = []
         unresolved = []
@@ -317,7 +300,7 @@ class Insights(commands.Cog):
             return await interaction.followup.send(
                 "I couldn't find an archived player for: "
                 + ", ".join(f"`{item}`" for item in unresolved)
-                + ". Mentions must be linked to a ProAvalon account for this season.",
+                + ". Mentions must be linked to a ProAvalon account.",
                 ephemeral=True,
             )
         if not resolved:
@@ -325,7 +308,7 @@ class Insights(commands.Cog):
                 "No valid players were supplied.", ephemeral=True
             )
 
-        rows = await search_matches_by_players(int(season["id"]), resolved)
+        rows = await search_guild_matches_by_players(interaction.guild_id, resolved)
         if not rows:
             return await interaction.followup.send(
                 "No archived matches contain every supplied player.", ephemeral=True
@@ -333,7 +316,6 @@ class Insights(commands.Cog):
 
         view = MatchSearchView(
             rows=rows,
-            season=season,
             searched_names=resolved,
             requesting_user_id=interaction.user.id,
         )

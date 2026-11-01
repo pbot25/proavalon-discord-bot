@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 import json
 
+from database import connection as database_connection
 from database.connection import connect
 
 
@@ -81,35 +82,6 @@ async def get_active_season(
             (_guild_id_text(guild_id),),
         )
 
-        return await cursor.fetchone()
-    finally:
-        await database.close()
-
-
-async def get_viewable_season(
-    guild_id: int,
-):
-    """Return the live season, or a deliberately mounted read-only archive."""
-    database = await connect()
-    await _ensure_season_display_name_column(database)
-
-    try:
-        cursor = await database.execute(
-            """
-            SELECT
-                season.*,
-                CASE WHEN mount.guild_id IS NULL THEN 0 ELSE 1 END AS is_mounted
-            FROM community_seasons season
-            LEFT JOIN season_archive_mounts mount
-              ON mount.community_season_id = season.id
-             AND mount.guild_id = season.guild_id
-            WHERE season.guild_id = ?
-              AND (season.is_active = 1 OR mount.guild_id IS NOT NULL)
-            ORDER BY season.is_active DESC, season.id DESC
-            LIMIT 1
-            """,
-            (_guild_id_text(guild_id),),
-        )
         return await cursor.fetchone()
     finally:
         await database.close()
@@ -275,16 +247,6 @@ async def create_season(
     await _ensure_season_display_name_column(database)
 
     try:
-        mount_cursor = await database.execute(
-            "SELECT 1 FROM season_archive_mounts WHERE guild_id = ? LIMIT 1",
-            (guild_text,),
-        )
-        if await mount_cursor.fetchone() is not None:
-            raise RuntimeError(
-                "Unmount the temporarily viewed season archive before creating "
-                "a new season."
-            )
-
         existing_cursor = await database.execute(
             """
             SELECT
@@ -353,17 +315,10 @@ async def create_season(
         next_cursor = await database.execute(
             """
             SELECT COALESCE(MAX(season_number), 0) + 1 AS next_number
-            FROM (
-                SELECT season_number
-                FROM community_seasons
-                WHERE guild_id = ?
-                UNION ALL
-                SELECT season_number
-                FROM season_archive_exports
-                WHERE guild_id = ?
-            )
+            FROM community_seasons
+            WHERE guild_id = ?
             """,
-            (guild_text, guild_text),
+            (guild_text,),
         )
         next_row = await next_cursor.fetchone()
         internal_number = int(next_row["next_number"])
@@ -461,6 +416,79 @@ async def end_active_season(
         return active_season
     finally:
         await database.close()
+
+
+async def cleanup_ended_season_operational_data(
+    guild_id: int,
+    community_season_id: int,
+    season_started_at: str,
+) -> dict:
+    """Compact an ended season while retaining searchable match history."""
+    guild_text = _guild_id_text(guild_id)
+    cleanup_finished_at = utc_now()
+    database_path = database_connection.DATABASE_PATH
+    size_before = database_path.stat().st_size if database_path.exists() else 0
+    database = await connect()
+    compacted = False
+
+    try:
+        await database.execute("PRAGMA busy_timeout = 30000")
+        cursor = await database.execute(
+            """
+            DELETE FROM recording_audit_events
+            WHERE guild_id = ?
+              AND created_at >= ?
+              AND created_at <= ?
+            """,
+            (guild_text, str(season_started_at), cleanup_finished_at),
+        )
+        deleted_audit_events = max(0, int(cursor.rowcount or 0))
+
+        voided_cursor = await database.execute(
+            "DELETE FROM season_voided_players WHERE community_season_id = ?",
+            (community_season_id,),
+        )
+        deleted_voided_players = max(0, int(voided_cursor.rowcount or 0))
+
+        compacted_cursor = await database.execute(
+            """
+            UPDATE season_matches
+            SET vote_history_json = NULL,
+                rating_changes_json = NULL,
+                posted_at = NULL,
+                posted_channel_id = NULL,
+                posted_message_id = NULL,
+                recording_status = NULL
+            WHERE community_season_id = ?
+            """,
+            (community_season_id,),
+        )
+        compacted_matches = max(0, int(compacted_cursor.rowcount or 0))
+        await database.commit()
+
+        try:
+            await database.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        except Exception:
+            pass
+
+        try:
+            await database.execute("VACUUM")
+            compacted = True
+        except Exception:
+            # Deleted SQLite pages remain reusable even if the file cannot be
+            # physically compacted during this command.
+            compacted = False
+    finally:
+        await database.close()
+
+    size_after = database_path.stat().st_size if database_path.exists() else size_before
+    return {
+        "deleted_audit_events": deleted_audit_events,
+        "deleted_voided_players": deleted_voided_players,
+        "compacted_matches": compacted_matches,
+        "compacted": compacted,
+        "bytes_reclaimed": max(0, size_before - size_after),
+    }
 
 
 async def is_season_player_voided(
@@ -863,13 +891,6 @@ async def reset_all_season_data(
         await database.execute(
             """
             DELETE FROM community_seasons
-            WHERE guild_id = ?
-            """,
-            (guild_text,),
-        )
-        await database.execute(
-            """
-            DELETE FROM season_archive_exports
             WHERE guild_id = ?
             """,
             (guild_text,),
