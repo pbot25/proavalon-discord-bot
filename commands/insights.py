@@ -7,9 +7,16 @@ import re
 import discord
 from discord import app_commands
 from discord.ext import commands
-from database.insights import active_or_latest,season_rows,recent_rows,find_match,registered_usernames,all_links_for_discord,bot_status_data,unpack,player_summary,streak_summary,role_summary,alignment_summary,role_board,activity_summary,season_records,season_overview_summary,ratings_for_usernames,relationships,season_match_player_names,season_player_discord_links,search_matches_by_players,guild_match_player_names,search_guild_matches_by_players
+from database.insights import active_or_latest,season_rows,recent_rows,find_match,registered_usernames,all_links_for_discord,bot_status_data,unpack,player_summary,streak_summary,role_summary,alignment_summary,role_board,activity_summary,season_records,season_overview_summary,ratings_for_usernames,relationships,season_match_player_names,season_player_discord_links,search_matches_by_players,guild_match_player_names,search_guild_matches_by_players,winner_norm
 from utils.permissions import bot_admin_only
 from database.account_links import get_preferred_link_for_discord
+from database.social_stats import build_player_social_stats, get_season_matches
+from commands.stats import (
+    HISTORY_ROLE_CHOICES,
+    SOCIAL_LIST_CHOICES,
+    SocialListView,
+    build_social_embed,
+)
 from utils.discord_users import parse_discord_user_id
 from database.seasons import (
     get_season_by_prefix,
@@ -614,6 +621,263 @@ class PastSeason(commands.GroupCog, group_name="past-season", group_description=
         if interaction.guild_id is None:
             return None
         return await get_season_by_prefix(interaction.guild_id, prefix)
+
+    async def _player(
+        self,
+        interaction: discord.Interaction,
+        season,
+        username: str | None,
+        discord_user: discord.Member | None,
+    ):
+        if username and username.strip() and discord_user is not None:
+            return None, "Choose either `username` or `discord_user`, not both."
+        if username and username.strip():
+            requested = username.strip()
+        else:
+            target = discord_user or interaction.user
+            link = await get_preferred_link_for_discord(
+                interaction.guild_id,
+                target.id,
+                int(season["season_number"]),
+            )
+            if link is None:
+                return None, (
+                    f"{target.mention} is not linked to an account for "
+                    f"{season_display_name(season)}."
+                )
+            requested = str(link["proavalon_username"])
+
+        names = await season_match_player_names(int(season["id"]))
+        resolved = next(
+            (name for name in names if name.casefold() == requested.casefold()),
+            None,
+        )
+        if resolved is None:
+            return None, (
+                f"`{requested}` has no preserved matches in "
+                f"{season_display_name(season)}."
+            )
+        return resolved, None
+
+    @app_commands.command(name="player", description="Shows a player's archived statistics from a previous season.")
+    @app_commands.describe(
+        season_prefix="Season prefix, for example s4.",
+        username="Player name. Leave blank to use your linked account.",
+        discord_user="Linked Discord user to inspect.",
+    )
+    async def player(
+        self,
+        interaction: discord.Interaction,
+        season_prefix: str,
+        username: str | None = None,
+        discord_user: discord.Member | None = None,
+    ):
+        season = await self._season(interaction, season_prefix)
+        if not season:
+            return await interaction.response.send_message("That season prefix was not found.", ephemeral=True)
+        resolved, error = await self._player(interaction, season, username, discord_user)
+        if error:
+            return await interaction.response.send_message(error, ephemeral=True)
+
+        rows = await season_rows(int(season["id"]))
+        overall = player_summary(rows, resolved)
+        alignments = alignment_summary(rows, resolved)
+        streaks = streak_summary(rows, resolved)
+        roles = role_summary(rows, resolved)
+        embed = discord.Embed(
+            title=f"{resolved} — {season_display_name(season)}",
+            description=(
+                f"**Overall:** {overall['wins']}W–{overall['losses']}L "
+                f"• {overall['wr']:.1f}% WR • {overall['games']} games\n"
+                f"**Current streak:** {streaks['current']} {streaks['current_kind']}\n"
+                f"**Longest win streak:** {streaks['longest_win']}\n"
+                f"**Longest loss streak:** {streaks['longest_loss']}"
+            ),
+            color=discord.Color.blurple(),
+        )
+        for alignment_name in ("Resistance", "Spy"):
+            item = alignments[alignment_name]
+            embed.add_field(
+                name=alignment_name,
+                value=f"{item['wins']}W–{item['losses']}L • {item['wr']:.1f}% WR • {item['games']} games",
+                inline=False,
+            )
+        role_lines = [
+            f"**{item['role']}** — {item['wins']}W–{item['losses']}L • {item['wr']:.1f}% WR • {item['games']} games"
+            for item in roles
+        ]
+        embed.add_field(name="Roles", value="\n".join(role_lines)[:1024] or "N/A", inline=False)
+        embed.set_footer(text="Archived match data; live ratings and deleted voting details are excluded.")
+        await interaction.response.send_message(embed=embed)
+
+    @app_commands.command(name="history", description="Shows archived wins and losses from a previous season.")
+    @app_commands.describe(
+        season_prefix="Season prefix, for example s4.",
+        username="Player name. Leave blank to use your linked account.",
+        discord_user="Linked Discord user to inspect.",
+        games="Number of recent qualifying games to show.",
+        role="Optionally filter by role or alignment.",
+    )
+    @app_commands.choices(role=HISTORY_ROLE_CHOICES)
+    async def history(
+        self,
+        interaction: discord.Interaction,
+        season_prefix: str,
+        username: str | None = None,
+        discord_user: discord.Member | None = None,
+        games: app_commands.Range[int, 1, 250] = 10,
+        role: app_commands.Choice[str] | None = None,
+    ):
+        season = await self._season(interaction, season_prefix)
+        if not season:
+            return await interaction.response.send_message("That season prefix was not found.", ephemeral=True)
+        resolved, error = await self._player(interaction, season, username, discord_user)
+        if error:
+            return await interaction.response.send_message(error, ephemeral=True)
+
+        rows = await season_rows(int(season["id"]))
+        role_filter = role.value.casefold() if role else None
+        results = []
+        for row in reversed(rows):
+            participant = next((p for p in unpack(row) if p["username"].casefold() == resolved.casefold()), None)
+            if participant is None or participant["alignment"] is None:
+                continue
+            if role_filter:
+                stored = str(participant["role"] or "").replace(" ", "").casefold()
+                matches = (
+                    participant["alignment"] == "Resistance" if role_filter == "overall-resistance"
+                    else participant["alignment"] == "Spy" if role_filter == "overall-spy"
+                    else stored == "resistance" if role_filter == "vt"
+                    else stored in {"tristan", "isolde"} if role_filter == "lover"
+                    else stored == role_filter
+                )
+                if not matches:
+                    continue
+            winner = winner_norm(row["winner"])
+            if winner:
+                results.append(participant["alignment"] == winner)
+
+        selected = results[:int(games)]
+        if not selected:
+            return await interaction.response.send_message("No qualifying archived results were found.", ephemeral=True)
+        wins = sum(selected)
+        icons = ["✅" if won else "❌" for won in selected]
+        lines = [" ".join(icons[i:i + 25]) for i in range(0, len(icons), 25)]
+        embed = discord.Embed(
+            title=f"{resolved} — {season_display_name(season)} History",
+            description=(
+                f"**{role.name if role else 'Overall'} • {len(selected)} most recent**\n"
+                + "\n".join(lines)
+                + f"\n\n**{wins}W–{len(selected) - wins}L • {wins / len(selected) * 100:.1f}% WR**"
+            ),
+            color=discord.Color.blurple(),
+        )
+        embed.set_footer(text="Newest → oldest")
+        await interaction.response.send_message(embed=embed)
+
+    @app_commands.command(name="social", description="Shows archived social statistics from a previous season.")
+    @app_commands.describe(
+        season_prefix="Season prefix, for example s4.",
+        username="Player name. Leave blank to use your linked account.",
+        discord_user="Linked Discord user to inspect.",
+    )
+    async def social(
+        self,
+        interaction: discord.Interaction,
+        season_prefix: str,
+        username: str | None = None,
+        discord_user: discord.Member | None = None,
+    ):
+        season = await self._season(interaction, season_prefix)
+        if not season:
+            return await interaction.response.send_message("That season prefix was not found.", ephemeral=True)
+        resolved, error = await self._player(interaction, season, username, discord_user)
+        if error:
+            return await interaction.response.send_message(error, ephemeral=True)
+        matches = await get_season_matches(int(season["id"]))
+        stats = build_player_social_stats(matches, resolved, minimum_shared_games=3)
+        if stats is None:
+            return await interaction.response.send_message("No archived social statistics were found.", ephemeral=True)
+        await interaction.response.send_message(
+            embed=build_social_embed(season_name=season_display_name(season), stats=stats)
+        )
+
+    @app_commands.command(name="list", description="Lists archived teammates and rivals from a previous season.")
+    @app_commands.describe(
+        season_prefix="Season prefix, for example s4.",
+        category="Relationship list to show.",
+        username="Player name. Leave blank to use your linked account.",
+        discord_user="Linked Discord user to inspect.",
+        minimum_games="Minimum shared games required.",
+        results_per_page="Results shown on each page.",
+    )
+    @app_commands.choices(category=SOCIAL_LIST_CHOICES)
+    async def relationship_list(
+        self,
+        interaction: discord.Interaction,
+        season_prefix: str,
+        category: app_commands.Choice[str],
+        username: str | None = None,
+        discord_user: discord.Member | None = None,
+        minimum_games: app_commands.Range[int, 1, 999] = 1,
+        results_per_page: app_commands.Range[int, 5, 25] = 10,
+    ):
+        season = await self._season(interaction, season_prefix)
+        if not season:
+            return await interaction.response.send_message("That season prefix was not found.", ephemeral=True)
+        resolved, error = await self._player(interaction, season, username, discord_user)
+        if error:
+            return await interaction.response.send_message(error, ephemeral=True)
+
+        matches = await get_season_matches(int(season["id"]))
+        stats = build_player_social_stats(matches, resolved, minimum_shared_games=1)
+        if stats is None:
+            return await interaction.response.send_message("No archived social statistics were found.", ephemeral=True)
+        items = list(stats["relationships"])
+        minimum = int(minimum_games)
+        value = category.value
+
+        if value == "most-played-with":
+            items = [x for x in items if int(x["shared_games"]) >= minimum]
+            items.sort(key=lambda x: (-int(x["shared_games"]), str(x["username"]).casefold()))
+            title = f"{resolved} — Most Played With"
+            lines = [f"**{i}.** `{x['username']}` — **{x['shared_games']} shared** • {x['same_games']} same • {x['opposite_games']} opposite" for i, x in enumerate(items, 1)]
+        elif value == "teammates":
+            items = [x for x in items if int(x["same_games"]) >= minimum]
+            items.sort(key=lambda x: (-int(x["same_games"]), -float(x["same_win_rate"]), str(x["username"]).casefold()))
+            title = f"{resolved} — Teammates"
+            lines = [f"**{i}.** `{x['username']}` — **{x['same_games']} together** • {x['same_win_rate']:.1f}% WR" for i, x in enumerate(items, 1)]
+        elif value in {"best-teammates", "best-resistance-teammates", "best-spy-teammates"}:
+            if value == "best-resistance-teammates":
+                games_key, wins_key, losses_key, wr_key, label = "res_games", "res_wins", "res_losses", "res_win_rate", "Best Resistance Teammates"
+            elif value == "best-spy-teammates":
+                games_key, wins_key, losses_key, wr_key, label = "spy_games", "spy_wins", "spy_losses", "spy_win_rate", "Best Spy Teammates"
+            else:
+                games_key, wins_key, losses_key, wr_key, label = "same_games", "same_wins", "same_losses", "same_win_rate", "Best Teammates"
+            items = [x for x in items if int(x[games_key]) >= minimum]
+            items.sort(key=lambda x: (-float(x[wr_key]), -int(x[games_key]), str(x["username"]).casefold()))
+            title = f"{resolved} — {label}"
+            lines = [f"**{i}.** `{x['username']}` — **{x[wr_key]:.1f}% WR** • {x[wins_key]}W–{x[losses_key]}L • {x[games_key]} games" for i, x in enumerate(items, 1)]
+        elif value == "rivals":
+            items = [x for x in items if int(x["opposite_games"]) >= minimum]
+            items.sort(key=lambda x: (-int(x["opposite_games"]), -float(x["opponent_win_rate"]), str(x["username"]).casefold()))
+            title = f"{resolved} — Rivals"
+            lines = [f"**{i}.** `{x['username']}` — **{x['opposite_games']} opposite** • {x['opponent_wins']}W–{x['opponent_losses']}L • {x['opponent_win_rate']:.1f}% WR" for i, x in enumerate(items, 1)]
+        else:
+            items = [x for x in items if int(x["opposite_games"]) >= minimum]
+            items.sort(key=lambda x: (-float(x["opponent_win_rate"]), -int(x["opponent_games"] if "opponent_games" in x else x["opposite_games"]), str(x["username"]).casefold()))
+            title = f"{resolved} — Most Dominated"
+            lines = [f"**{i}.** `{x['username']}` — **{x['opponent_win_rate']:.1f}% WR** • {x['opponent_wins']}W–{x['opponent_losses']}L • {x['opposite_games']} games" for i, x in enumerate(items, 1)]
+
+        view = SocialListView(
+            title=title,
+            lines=lines,
+            season_name=season_display_name(season),
+            minimum_games=minimum,
+            page_size=int(results_per_page),
+            requesting_user_id=interaction.user.id,
+        )
+        await interaction.response.send_message(embed=view.build_embed(), view=view)
 
     @app_commands.command(name="info", description="Shows general information about a previous season.")
     @app_commands.describe(season_prefix="Season prefix, for example s4 or r1.")
