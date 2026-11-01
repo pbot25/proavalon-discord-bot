@@ -67,6 +67,22 @@ class SeasonCleanupTests(unittest.IsolatedAsyncioTestCase):
                 ) VALUES (1, 's4voided', '456', '2001-01-01')
                 """
             )
+            await database.execute(
+                """
+                INSERT INTO season_match_configs (
+                    guild_id, channel_id, enabled, updated_at
+                ) VALUES ('123', '777', 1, '2001-01-01')
+                """
+            )
+            await database.execute(
+                """
+                INSERT INTO daily_leaderboard_channels (
+                    guild_id, leaderboard_type, channel_id, post_time,
+                    enabled, minimum_games, top_count, updated_at
+                ) VALUES ('123', 'rating', '888', '20:00', 1, 5, 500,
+                          '2001-01-01')
+                """
+            )
             await database.executemany(
                 """
                 INSERT INTO recording_audit_events (
@@ -112,6 +128,25 @@ class SeasonCleanupTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(await count("season_matches"), 1)
             self.assertEqual(await count("season_voided_players"), 0)
             self.assertEqual(await count("recording_audit_events"), 2)
+
+            match_config = await (
+                await database.execute(
+                    "SELECT enabled, channel_id FROM season_match_configs "
+                    "WHERE guild_id = '123'"
+                )
+            ).fetchone()
+            self.assertEqual(match_config["enabled"], 1)
+            self.assertEqual(match_config["channel_id"], "777")
+
+            daily_config = await (
+                await database.execute(
+                    "SELECT enabled, channel_id, post_time "
+                    "FROM daily_leaderboard_channels WHERE guild_id = '123'"
+                )
+            ).fetchone()
+            self.assertEqual(daily_config["enabled"], 1)
+            self.assertEqual(daily_config["channel_id"], "888")
+            self.assertEqual(daily_config["post_time"], "20:00")
 
             match = await (
                 await database.execute(

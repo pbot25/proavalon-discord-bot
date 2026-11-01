@@ -349,8 +349,9 @@ class EndSeasonView(discord.ui.View):
                 "season account links, and YouTube links remain available. Detailed "
                 "vote history, rating-change payloads, recording logs/statuses, and "
                 "obsolete void-list entries were removed.\n"
-                "Daily leaderboard and automatic match posting "
-                "have been disabled for this server.\n"
+                "Daily leaderboards and automatic match-history posting are "
+                "preserved. They will resume automatically when the next season "
+                "starts.\n"
                 f"{cleanup_message}"
             ),
         )

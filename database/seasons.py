@@ -394,24 +394,6 @@ async def end_active_season(
             ),
         )
 
-        # Season-scoped automatic posting must never outlive the season.
-        await database.execute(
-            """
-            UPDATE daily_leaderboard_configs
-            SET enabled = 0, updated_at = ?
-            WHERE guild_id = ?
-            """,
-            (now, guild_text),
-        )
-        await database.execute(
-            """
-            UPDATE season_match_configs
-            SET enabled = 0, updated_at = ?
-            WHERE guild_id = ?
-            """,
-            (now, guild_text),
-        )
-
         await database.commit()
         return active_season
     finally:
