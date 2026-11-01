@@ -575,30 +575,55 @@ async def get_registered_players_with_links(
     try:
         cursor = await database.execute(
             """
-            SELECT
-                season_players.proavalon_username,
-                season_players.first_seen_at,
-                season_players.last_seen_at,
-                account_links.discord_user_id
-            FROM season_players
+            WITH selected_season AS (
+                SELECT id, guild_id, season_number
+                FROM community_seasons
+                WHERE id = ? AND guild_id = ?
+            ),
+            registered AS (
+                SELECT
+                    season_players.proavalon_username,
+                    season_players.first_seen_at,
+                    season_players.last_seen_at,
+                    account_links.discord_user_id
+                FROM season_players
+                JOIN selected_season
+                  ON selected_season.id = season_players.community_season_id
+                LEFT JOIN account_links
+                  ON account_links.guild_id = selected_season.guild_id
+                 AND account_links.proavalon_username =
+                      season_players.proavalon_username COLLATE NOCASE
+                 AND account_links.season_number = selected_season.season_number
+                 AND account_links.is_active = 1
 
-            INNER JOIN community_seasons
-                ON community_seasons.id = season_players.community_season_id
+                UNION ALL
 
-            LEFT JOIN account_links
-                ON account_links.guild_id = ?
-               AND account_links.proavalon_username =
-                    season_players.proavalon_username COLLATE NOCASE
-               AND account_links.season_number = community_seasons.season_number
-               AND account_links.is_active = 1
-
-            WHERE season_players.community_season_id = ?
-
-            ORDER BY season_players.proavalon_username COLLATE NOCASE ASC
+                SELECT
+                    account_links.proavalon_username,
+                    account_links.linked_at AS first_seen_at,
+                    account_links.linked_at AS last_seen_at,
+                    account_links.discord_user_id
+                FROM account_links
+                JOIN selected_season
+                  ON selected_season.guild_id = account_links.guild_id
+                 AND selected_season.season_number = account_links.season_number
+                WHERE account_links.is_active = 1
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM season_players
+                      WHERE season_players.community_season_id = selected_season.id
+                        AND season_players.proavalon_username =
+                            account_links.proavalon_username COLLATE NOCASE
+                  )
+            )
+            SELECT proavalon_username, first_seen_at, last_seen_at,
+                   discord_user_id
+            FROM registered
+            ORDER BY proavalon_username COLLATE NOCASE ASC
             """,
             (
-                _guild_id_text(guild_id),
                 community_season_id,
+                _guild_id_text(guild_id),
             ),
         )
         return await cursor.fetchall()

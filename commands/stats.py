@@ -7,7 +7,6 @@ from discord import app_commands
 from discord.ext import commands
 
 from database.account_links import get_preferred_link_for_discord
-from database.known_players import get_known_proavalon_usernames
 from database.ratings import get_cached_rating
 from database.voting_metrics import get_player_voting_metrics
 from database.social_stats import (
@@ -682,11 +681,12 @@ async def player_username_autocomplete(
     current: str,
 ) -> list[app_commands.Choice[str]]:
     """
-    Autocomplete /stats player from usernames this server already knows.
+    Autocomplete /stats player from the active season's registered players.
 
     Discord supports at most 25 autocomplete choices, so an empty field
     shows the first 25 alphabetical usernames and typing filters the full
-    known-user pool down to the first 25 matches.
+    active-season pool down to the first 25 matches. Archived-season names
+    intentionally remain available only through /past-season commands.
 
     Voided players from the active season are omitted because /stats
     player is blocked for them while that season is active.
@@ -695,27 +695,27 @@ async def player_username_autocomplete(
     if interaction.guild_id is None:
         return []
 
-    usernames = await get_known_proavalon_usernames(
-        interaction.guild_id
-    )
-
     active_season = await get_active_season(
         interaction.guild_id
     )
 
-    if active_season is not None:
-        filtered_usernames: list[str] = []
+    if active_season is None:
+        return []
 
-        for username in usernames:
-            if await is_season_player_voided(
-                int(active_season["id"]),
-                username,
-            ):
-                continue
+    players = await get_season_players(active_season["id"])
+    usernames = [str(player["proavalon_username"]) for player in players]
+    filtered_usernames: list[str] = []
 
-            filtered_usernames.append(username)
+    for username in usernames:
+        if await is_season_player_voided(
+            int(active_season["id"]),
+            username,
+        ):
+            continue
 
-        usernames = filtered_usernames
+        filtered_usernames.append(username)
+
+    usernames = filtered_usernames
 
     normalized_current = current.strip().casefold()
 

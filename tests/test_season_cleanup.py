@@ -1,6 +1,7 @@
 from pathlib import Path
 import tempfile
 import unittest
+from types import SimpleNamespace
 
 import database.connection as connection
 from database.connection import initialize_database
@@ -9,6 +10,8 @@ from database.seasons import (
     end_active_season,
 )
 from database.insights import search_guild_matches_by_players
+from database.account_links import get_registered_players_with_links
+from commands.stats import player_username_autocomplete
 
 
 class SeasonCleanupTests(unittest.IsolatedAsyncioTestCase):
@@ -43,6 +46,14 @@ class SeasonCleanupTests(unittest.IsolatedAsyncioTestCase):
                     guild_id, discord_user_id, proavalon_username,
                     season_number, linked_at, is_active
                 ) VALUES ('123', '456', 's4player', 4, '2000-01-01', 1)
+                """
+            )
+            await database.execute(
+                """
+                INSERT INTO account_links (
+                    guild_id, discord_user_id, proavalon_username,
+                    season_number, linked_at, is_active
+                ) VALUES ('123', '789', 's4zerogames', 4, '2000-01-02', 1)
                 """
             )
             await database.execute(
@@ -105,6 +116,11 @@ class SeasonCleanupTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_cleanup_preserves_historical_season_data(self) -> None:
         season = await end_active_season(123)
+        choices = await player_username_autocomplete(
+            SimpleNamespace(guild_id=123),
+            "s4",
+        )
+        self.assertEqual(choices, [])
         result = await cleanup_ended_season_operational_data(
             123,
             int(season["id"]),
@@ -124,7 +140,7 @@ class SeasonCleanupTests(unittest.IsolatedAsyncioTestCase):
 
             self.assertEqual(await count("community_seasons"), 1)
             self.assertEqual(await count("season_players"), 1)
-            self.assertEqual(await count("account_links"), 1)
+            self.assertEqual(await count("account_links"), 2)
             self.assertEqual(await count("season_matches"), 1)
             self.assertEqual(await count("season_voided_players"), 0)
             self.assertEqual(await count("recording_audit_events"), 2)
@@ -167,6 +183,15 @@ class SeasonCleanupTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNone(match["recording_status"])
         finally:
             await database.close()
+
+    async def test_registered_players_include_linked_zero_game_accounts(self) -> None:
+        players = await get_registered_players_with_links(123, 1)
+        by_name = {
+            str(player["proavalon_username"]): player
+            for player in players
+        }
+        self.assertEqual(set(by_name), {"s4player", "s4zerogames"})
+        self.assertEqual(by_name["s4zerogames"]["discord_user_id"], "789")
 
     async def test_match_search_spans_seasons_and_labels_results(self) -> None:
         database = await connection.connect()
