@@ -15,6 +15,7 @@ from database.leaderboard_profiles import (
     save_profile_snapshot,
 )
 from database.voting_metrics import get_season_voting_metrics
+from database.insights import season_rows, unpack, winner_norm
 from database.seasons import (
     get_active_season,
     get_season_players,
@@ -395,6 +396,79 @@ def sort_entries(
             entry.username.casefold(),
         ),
     )
+
+
+async def build_season_archive_entries(
+    *,
+    season_id: int,
+    players,
+    metric: str,
+    minimum_games: int,
+) -> list[LeaderboardEntry]:
+    """Build active-season leaderboards from matches already in the database."""
+    registered = {
+        str(player["proavalon_username"]).casefold()
+        for player in players
+    }
+    totals: dict[str, dict] = {}
+
+    for row in await season_rows(season_id):
+        winner = winner_norm(row["winner"])
+        try:
+            duration = max(0.0, float(row["game_duration_seconds"] or 0))
+        except (TypeError, ValueError):
+            duration = 0.0
+
+        for participant in unpack(row):
+            username = str(participant["username"])
+            key = username.casefold()
+            if key not in registered:
+                continue
+
+            role = str(participant["role"] or "").replace(" ", "").casefold()
+            alignment = participant["alignment"]
+            if metric in {"overall", "games_played", "rating", "total_time"}:
+                qualifies = alignment is not None
+            elif metric == "resistance":
+                qualifies = alignment == "Resistance"
+            elif metric == "spy":
+                qualifies = alignment == "Spy"
+            elif metric == "vt":
+                qualifies = role == "resistance"
+            elif metric == "lover":
+                qualifies = role in {"tristan", "isolde"}
+            else:
+                qualifies = role == metric.casefold()
+
+            if not qualifies:
+                continue
+
+            item = totals.setdefault(
+                key,
+                {"username": username, "games": 0, "wins": 0, "time": 0.0},
+            )
+            item["games"] += 1
+            item["wins"] += int(winner is not None and alignment == winner)
+            item["time"] += duration
+
+    entries = []
+    for item in totals.values():
+        if item["games"] < minimum_games:
+            continue
+        rating = get_cached_rating(item["username"])
+        entries.append(
+            LeaderboardEntry(
+                username=item["username"],
+                games=item["games"],
+                wins=item["wins"],
+                losses=item["games"] - item["wins"],
+                rating_bracket=rating.rating_bracket if rating else None,
+                rating=rating.rating if rating else None,
+                rating_updated_at=rating.rating_updated_at if rating else None,
+                total_time_seconds=item["time"],
+            )
+        )
+    return sort_entries(entries, metric)
 
 
 def leaderboard_shows_tier(metric: str) -> bool:
@@ -1446,25 +1520,15 @@ class LeaderboardCommands(commands.Cog):
             await interaction.followup.send(embed=view.build_embed(), view=view)
             return
 
-        (
-            profiles,
-            refreshed_count,
-            failed_count,
-            cache_hit,
-        ) = await self.get_leaderboard_profiles(
-            guild_id=guild_id,
+        entries = await build_season_archive_entries(
             season_id=int(season["id"]),
             players=players,
-        )
-
-        entries = self.build_entries(
-            profiles=profiles,
-            tracked_player_count=int(
-                season["tracked_player_count"]
-            ),
             metric=statistic.value,
             minimum_games=minimum_games,
         )
+        refreshed_count = 0
+        failed_count = 0
+        cache_hit = True
 
         total_qualifying_before_limit = len(entries)
 
@@ -1487,9 +1551,7 @@ class LeaderboardCommands(commands.Cog):
             refreshed_count=refreshed_count,
             failed_count=failed_count,
             cache_hit=cache_hit,
-            cache_age_seconds=self._cache_age_seconds(
-                guild_id
-            ),
+            cache_age_seconds=0,
             requesting_user_id=interaction.user.id,
         )
 
@@ -2025,34 +2087,39 @@ class DailyLeaderboardCommands(
         if not players:
             return
 
-        # The daily post normally forces a fresh snapshot. If a command
-        # refreshed the same guild within the last five minutes, reuse it
-        # to avoid scraping everyone twice at essentially the same time.
-        (
-            profiles,
-            _,
-            _,
-            _,
-        ) = await leaderboard_cog.get_leaderboard_profiles(
-            guild_id=guild_id,
-            season_id=int(season["id"]),
-            players=players,
-            force_refresh=True,
-            allow_recent_force_reuse=True,
-        )
-
         metric = str(config["leaderboard_type"])
         minimum_games = int(
             config["minimum_games"]
         )
-        entries = leaderboard_cog.build_entries(
-            profiles=profiles,
-            tracked_player_count=int(
-                season["tracked_player_count"]
-            ),
-            metric=metric,
-            minimum_games=minimum_games,
-        )
+        if metric in {"crit_accuracy", "crit_errors"}:
+            voting = await get_season_voting_metrics(int(season["id"]))
+            registered = {
+                str(row["proavalon_username"]).casefold()
+                for row in players
+            }
+            entries = [
+                LeaderboardEntry(
+                    username=item.username,
+                    games=item.overall.eligible_votes,
+                    wins=item.overall.correct_votes,
+                    losses=(
+                        item.overall.eligible_votes
+                        - item.overall.correct_votes
+                    ),
+                    crit_errors=item.overall.crit_errors,
+                )
+                for key, item in voting.items()
+                if key in registered
+                and item.overall.eligible_votes >= minimum_games
+            ]
+            entries = sort_entries(entries, metric)
+        else:
+            entries = await build_season_archive_entries(
+                season_id=int(season["id"]),
+                players=players,
+                metric=metric,
+                minimum_games=minimum_games,
+            )
 
         embed = build_daily_embed(
             season_name=season_display_name(season),

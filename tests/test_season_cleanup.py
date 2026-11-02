@@ -12,6 +12,7 @@ from database.seasons import (
 from database.insights import search_guild_matches_by_players
 from database.account_links import get_registered_players_with_links
 from commands.stats import player_username_autocomplete
+from commands.leaderboard import build_season_archive_entries
 
 
 class SeasonCleanupTests(unittest.IsolatedAsyncioTestCase):
@@ -60,11 +61,12 @@ class SeasonCleanupTests(unittest.IsolatedAsyncioTestCase):
                 """
                 INSERT INTO season_matches (
                     community_season_id, season_match_id, match_fingerprint,
-                    room_id, detected_at, finished_at, mission_history_json,
+                    room_id, detected_at, finished_at, winner, mission_history_json,
                     fails_history_json, vote_history_json, players_json,
                     roles_json, rating_changes_json, posted_message_id,
                     youtube_url, recording_status
                 ) VALUES (1, 1, 'match-1', 10, '2001-01-01', '2001-01-01',
+                          'Resistance',
                           '["succeeded"]', '[0]', '{"votes": [1, 2, 3]}',
                           '["s4player"]', '["merlin"]', '{"delta": 5}', '999',
                           'https://youtu.be/example', 'ready')
@@ -192,6 +194,19 @@ class SeasonCleanupTests(unittest.IsolatedAsyncioTestCase):
         }
         self.assertEqual(set(by_name), {"s4player", "s4zerogames"})
         self.assertEqual(by_name["s4zerogames"]["discord_user_id"], "789")
+
+    async def test_active_leaderboard_uses_archived_matches(self) -> None:
+        players = await get_registered_players_with_links(123, 1)
+        entries = await build_season_archive_entries(
+            season_id=1,
+            players=players,
+            metric="overall",
+            minimum_games=1,
+        )
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0].username, "s4player")
+        self.assertEqual(entries[0].games, 1)
+        self.assertEqual(entries[0].wins, 1)
 
     async def test_match_search_spans_seasons_and_labels_results(self) -> None:
         database = await connection.connect()
