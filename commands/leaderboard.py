@@ -1562,7 +1562,7 @@ class LeaderboardCommands(commands.Cog):
 
     @app_commands.command(
         name="leaderboard-refresh",
-        description="Force-refreshes this server's leaderboard cache.",
+        description="Checks the active season's stored leaderboard data.",
     )
     @bot_admin_only()
     async def leaderboard_refresh(
@@ -1597,33 +1597,21 @@ class LeaderboardCommands(commands.Cog):
             )
             return
 
-        await interaction.response.defer(
-            thinking=True,
-            ephemeral=True,
-        )
-
-        (
-            profiles,
-            refreshed_count,
-            failed_count,
-            _,
-        ) = await self.get_leaderboard_profiles(
-            guild_id=guild_id,
-            season_id=int(season["id"]),
-            players=players,
-            force_refresh=True,
-            allow_recent_force_reuse=False,
-        )
-
-        await interaction.followup.send(
+        rows = await season_rows(int(season["id"]))
+        participant_names = {
+            str(participant["username"]).casefold()
+            for row in rows
+            for participant in unpack(row)
+        }
+        await interaction.response.send_message(
             (
-                f"Leaderboard cache refreshed for "
+                f"Leaderboard database is ready for "
                 f"{season_display_name(season)}.\n"
-                f"Successfully refreshed: {refreshed_count}\n"
-                f"Failed: {failed_count}\n"
-                f"Cached profiles: {len(profiles)}\n"
-                "Normal leaderboard requests will now reuse these saved "
-                "database snapshots until the next refresh."
+                f"Stored matches: **{len(rows):,}**\n"
+                f"Players seen in matches: **{len(participant_names):,}**\n"
+                f"Registered players: **{len(players):,}**\n"
+                "No ProAvalon profile scraping was performed. Every new archived "
+                "match updates the leaderboard automatically."
             ),
             ephemeral=True,
         )
