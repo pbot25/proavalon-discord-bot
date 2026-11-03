@@ -1,5 +1,6 @@
 import asyncio
 import os
+import time
 
 import discord
 from discord.ext import commands
@@ -50,6 +51,45 @@ class ProAvalonBot(commands.Bot):
             ttl_seconds=15 * 60,
         )
         self.recorder_bridge = RecorderBridge(self)
+        self.gateway_watchdog_task: asyncio.Task | None = None
+        self.gateway_disconnected_at: float | None = None
+        self.gateway_was_ready = False
+        self.restart_requested = False
+        self.resources_closed = False
+
+    async def gateway_watchdog(self) -> None:
+        """Recycle Pbot when Discord remains disconnected for three minutes."""
+        try:
+            await self.wait_until_ready()
+            self.gateway_was_ready = True
+            while not self.is_closed():
+                await asyncio.sleep(30)
+                if self.is_ready():
+                    self.gateway_disconnected_at = None
+                    continue
+
+                now = time.monotonic()
+                if self.gateway_disconnected_at is None:
+                    self.gateway_disconnected_at = now
+                    continue
+
+                disconnected_for = now - self.gateway_disconnected_at
+                if disconnected_for < 180:
+                    continue
+
+                print(
+                    "Discord gateway remained disconnected for "
+                    f"{int(disconnected_for)} seconds; recycling Pbot.",
+                    flush=True,
+                )
+                self.restart_requested = True
+                await self.close()
+                return
+        except asyncio.CancelledError:
+            raise
+        except RuntimeError:
+            # wait_until_ready raises if the bot closes during startup.
+            return
 
     async def setup_hook(self) -> None:
         print("Initializing database...")
@@ -87,8 +127,19 @@ class ProAvalonBot(commands.Bot):
         print(
             f"Synced {len(synced_commands)} Discord command(s)."
         )
+        self.gateway_watchdog_task = asyncio.create_task(
+            self.gateway_watchdog(),
+            name="discord-gateway-watchdog",
+        )
 
     async def close(self) -> None:
+        if self.resources_closed:
+            await super().close()
+            return
+        self.resources_closed = True
+        watchdog = self.gateway_watchdog_task
+        if watchdog is not None and watchdog is not asyncio.current_task():
+            watchdog.cancel()
         print("Closing recorder bridge...")
         await self.recorder_bridge.close()
         print("Closing ProAvalon scraper...")
@@ -101,7 +152,20 @@ def create_bot() -> ProAvalonBot:
 
     @bot.event
     async def on_ready() -> None:
+        bot.gateway_was_ready = True
+        bot.gateway_disconnected_at = None
         print(f"Logged into Discord as {bot.user}", flush=True)
+
+    @bot.event
+    async def on_disconnect() -> None:
+        if bot.gateway_was_ready and bot.gateway_disconnected_at is None:
+            bot.gateway_disconnected_at = time.monotonic()
+        print("Discord gateway disconnected; waiting for reconnection.", flush=True)
+
+    @bot.event
+    async def on_resumed() -> None:
+        bot.gateway_disconnected_at = None
+        print("Discord gateway session resumed.", flush=True)
 
     @bot.tree.command(
         name="ping",
@@ -126,7 +190,13 @@ async def run_bot_forever() -> None:
         try:
             async with bot:
                 await bot.start(DISCORD_TOKEN)
-            return
+            print(
+                "Discord client stopped; starting a fresh Pbot session in 10 seconds.",
+                flush=True,
+            )
+            await asyncio.sleep(10)
+            retry_delay = 10 * 60
+            continue
         except discord.HTTPException as error:
             if getattr(error, "status", None) != 429:
                 raise
