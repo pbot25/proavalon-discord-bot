@@ -53,6 +53,7 @@ class ProAvalonRatingTracker:
         # collide with the normal initial/final room inspections.
         self._room_action_lock = asyncio.Lock()
         self._snapshot_waiters: dict[int, asyncio.Future] = {}
+        self._roster_waiters: dict[int, asyncio.Future] = {}
         # Rooms are inspected only after a game starts, when the 10-player
         # roster is locked. This prevents repeated join/leave spam.
         self._initially_inspected = set()
@@ -110,6 +111,50 @@ class ProAvalonRatingTracker:
             return
         await self._websocket.send_str("42" + json.dumps([event, *args], separators=(",", ":")))
 
+    async def _inspect_finished_room(self, room_id: int) -> bool:
+        """Join one finished room and wait for its actual final game payload."""
+        loop = asyncio.get_running_loop()
+        future = loop.create_future()
+        self._snapshot_waiters[room_id] = future
+        self._current_room = room_id
+        try:
+            await self._emit("join-room", room_id)
+            try:
+                data = await asyncio.wait_for(future, timeout=4.0)
+            except asyncio.TimeoutError:
+                print(
+                    f"Final game-data timed out for room {room_id}; "
+                    "the tracker will retry it."
+                )
+                return False
+            return str((data or {}).get("phase") or "").casefold() == "finished"
+        finally:
+            await self._emit("leave-room", "")
+            self._snapshot_waiters.pop(room_id, None)
+            self._current_room = None
+
+    async def _inspect_started_room(self, room_id: int) -> bool:
+        """Join a started room and confirm its locked ten-player roster."""
+        loop = asyncio.get_running_loop()
+        future = loop.create_future()
+        self._roster_waiters[room_id] = future
+        self._current_room = room_id
+        try:
+            await self._emit("join-room", room_id)
+            try:
+                names = await asyncio.wait_for(future, timeout=4.0)
+            except asyncio.TimeoutError:
+                print(
+                    f"Initial roster timed out for room {room_id}; "
+                    "the tracker will retry it."
+                )
+                return False
+            return len(names or []) == 10
+        finally:
+            await self._emit("leave-room", "")
+            self._roster_waiters.pop(room_id, None)
+            self._current_room = None
+
     async def _room_rotator(self):
         """
         Inspect each 10-player game at most twice:
@@ -159,16 +204,15 @@ class ProAvalonRatingTracker:
                     break
 
             if final_room is not None:
-                self._final_visit_started.add(final_room)
                 async with self._room_action_lock:
-                    self._current_room = final_room
-                    await self._emit("join-room", final_room)
-                    # distributeGameData() is called immediately by ProAvalon
-                    # after a successful join-room. Leave enough time for the
-                    # room roster and final game-data events to arrive.
-                    await asyncio.sleep(1.25)
-                    await self._emit("leave-room", "")
-                    self._current_room = None
+                    received_final = await self._inspect_finished_room(final_room)
+                if received_final or final_room in self._finalizing:
+                    self._final_visit_started.add(final_room)
+                else:
+                    # Do not permanently suppress this room merely because
+                    # another simultaneous lobby or a reconnect delayed its
+                    # final payload.
+                    self._final_visit_started.discard(final_room)
                 await asyncio.sleep(0.35)
                 continue
 
@@ -199,15 +243,12 @@ class ProAvalonRatingTracker:
                     break
 
             if initial_room is not None:
-                # Mark it before joining so a transient event or exception
-                # does not create a rapid join/leave loop.
-                self._initially_inspected.add(initial_room)
                 async with self._room_action_lock:
-                    self._current_room = initial_room
-                    await self._emit("join-room", initial_room)
-                    await asyncio.sleep(1.25)
-                    await self._emit("leave-room", "")
-                    self._current_room = None
+                    received_roster = await self._inspect_started_room(initial_room)
+                if received_roster:
+                    self._initially_inspected.add(initial_room)
+                else:
+                    self._initially_inspected.discard(initial_room)
                 await asyncio.sleep(0.35)
                 continue
 
@@ -339,6 +380,15 @@ class ProAvalonRatingTracker:
                         if data.startswith("40"):
                             if not connected:
                                 connected = True
+                                # A previous socket may have disconnected after
+                                # join-room but before final game-data arrived.
+                                # Every unfinished tracked room must be eligible
+                                # for another final inspection on this socket.
+                                self._final_visit_started.difference_update(
+                                    room_id
+                                    for room_id in self._tracked
+                                    if room_id not in self._finalizing
+                                )
                                 print("ProAvalon live rating/match socket connected.")
                                 rotator = asyncio.create_task(self._room_rotator())
                             continue
@@ -366,6 +416,9 @@ class ProAvalonRatingTracker:
                                     self._pregame_rosters[self._current_room] = list(names)
                                 else:
                                     await self._consider_roster(self._current_room, names)
+                                roster_waiter = self._roster_waiters.get(self._current_room)
+                                if roster_waiter is not None and not roster_waiter.done():
+                                    roster_waiter.set_result(list(names))
                         elif event == "game-data" and isinstance(event_data, dict):
                             await self._handle_game_data(event_data)
                 finally:
