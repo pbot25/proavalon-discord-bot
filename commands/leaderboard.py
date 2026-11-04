@@ -10,15 +10,14 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 from database.ratings import get_cached_rating
+from database.account_links import get_registered_players_with_links
 from database.leaderboard_profiles import (
     load_profile_snapshots,
     save_profile_snapshot,
 )
 from database.voting_metrics import get_season_voting_metrics
-from database.insights import season_rows, unpack, winner_norm
 from database.seasons import (
     get_active_season,
-    get_season_players,
     season_display_name,
 )
 from database.settings import (
@@ -45,7 +44,9 @@ DEFAULT_MINIMUM_GAMES = 5
 
 # Keep a hot in-memory copy for two hours. After that, normal commands reload
 # the persistent database snapshot rather than scraping ProAvalon.
-LEADERBOARD_CACHE_SECONDS = 2 * 60 * 60
+# Website profiles are reused briefly so ordinary commands stay responsive,
+# but never for hours after new games have changed public statistics.
+LEADERBOARD_CACHE_SECONDS = 15 * 60
 
 # If the daily scheduled post happens right after another refresh, reuse
 # that very recent refresh instead of scraping everyone twice.
@@ -396,79 +397,6 @@ def sort_entries(
             entry.username.casefold(),
         ),
     )
-
-
-async def build_season_archive_entries(
-    *,
-    season_id: int,
-    players,
-    metric: str,
-    minimum_games: int,
-) -> list[LeaderboardEntry]:
-    """Build active-season leaderboards from matches already in the database."""
-    registered = {
-        str(player["proavalon_username"]).casefold()
-        for player in players
-    }
-    totals: dict[str, dict] = {}
-
-    for row in await season_rows(season_id):
-        winner = winner_norm(row["winner"])
-        try:
-            duration = max(0.0, float(row["game_duration_seconds"] or 0))
-        except (TypeError, ValueError):
-            duration = 0.0
-
-        for participant in unpack(row):
-            username = str(participant["username"])
-            key = username.casefold()
-            if key not in registered:
-                continue
-
-            role = str(participant["role"] or "").replace(" ", "").casefold()
-            alignment = participant["alignment"]
-            if metric in {"overall", "games_played", "rating", "total_time"}:
-                qualifies = alignment is not None
-            elif metric == "resistance":
-                qualifies = alignment == "Resistance"
-            elif metric == "spy":
-                qualifies = alignment == "Spy"
-            elif metric == "vt":
-                qualifies = role == "resistance"
-            elif metric == "lover":
-                qualifies = role in {"tristan", "isolde"}
-            else:
-                qualifies = role == metric.casefold()
-
-            if not qualifies:
-                continue
-
-            item = totals.setdefault(
-                key,
-                {"username": username, "games": 0, "wins": 0, "time": 0.0},
-            )
-            item["games"] += 1
-            item["wins"] += int(winner is not None and alignment == winner)
-            item["time"] += duration
-
-    entries = []
-    for item in totals.values():
-        if item["games"] < minimum_games:
-            continue
-        rating = get_cached_rating(item["username"])
-        entries.append(
-            LeaderboardEntry(
-                username=item["username"],
-                games=item["games"],
-                wins=item["wins"],
-                losses=item["games"] - item["wins"],
-                rating_bracket=rating.rating_bracket if rating else None,
-                rating=rating.rating if rating else None,
-                rating_updated_at=rating.rating_updated_at if rating else None,
-                total_time_seconds=item["time"],
-            )
-        )
-    return sort_entries(entries, metric)
 
 
 def leaderboard_shows_tier(metric: str) -> bool:
@@ -1183,16 +1111,19 @@ class LeaderboardCommands(commands.Cog):
         guild_id: int,
         season_id: int,
         players,
+        fallback_profiles: list[PlayerProfile] | None = None,
     ) -> tuple[list[PlayerProfile], int, int]:
         registered_usernames = {
             player["proavalon_username"].casefold()
             for player in players
         }
+        persisted_profiles: list[PlayerProfile] = []
 
-        profiles_by_username: dict[
-            str,
-            PlayerProfile,
-        ] = {}
+        profiles_by_username: dict[str, PlayerProfile] = {
+            profile.username.casefold(): profile
+            for profile in (fallback_profiles or [])
+        }
+        refreshed_count = 0
         failed_count = 0
 
         for player in players:
@@ -1217,6 +1148,7 @@ class LeaderboardCommands(commands.Cog):
             profiles_by_username[
                 profile.username.casefold()
             ] = profile
+            refreshed_count += 1
             await save_profile_snapshot(profile)
 
         self._cached_profiles[guild_id] = (
@@ -1235,7 +1167,7 @@ class LeaderboardCommands(commands.Cog):
 
         return (
             list(profiles_by_username.values()),
-            len(profiles_by_username),
+            refreshed_count,
             failed_count,
         )
 
@@ -1289,22 +1221,32 @@ class LeaderboardCommands(commands.Cog):
                 for profile in persisted_profiles
             }
             if persisted_by_username:
-                missing_count = len(
-                    registered_usernames.difference(persisted_by_username)
+                missing_count = len(registered_usernames.difference(persisted_by_username))
+                persisted_is_fresh = (
+                    persisted_age is not None
+                    and float(persisted_age) < LEADERBOARD_CACHE_SECONDS
                 )
-                self._cached_profiles[guild_id] = persisted_by_username
-                self._cache_refreshed_at[guild_id] = time.monotonic() - float(
-                    persisted_age or 0
-                )
-                self._cache_season_id[guild_id] = season_id
-                self._cache_registered_usernames[guild_id] = registered_usernames
-                self._cache_failed_count[guild_id] = missing_count
-                return (
-                    list(persisted_by_username.values()),
-                    0,
-                    missing_count,
-                    True,
-                )
+                if not persisted_is_fresh or missing_count:
+                    # Keep old snapshots only as a per-player fallback if a
+                    # live website request fails. Do not present the entire
+                    # stale snapshot as a successful current leaderboard.
+                    pass
+                else:
+                    self._cached_profiles[guild_id] = persisted_by_username
+                    self._cache_refreshed_at[guild_id] = time.monotonic() - float(
+                        persisted_age or 0
+                    )
+                    self._cache_season_id[guild_id] = season_id
+                    self._cache_registered_usernames[guild_id] = registered_usernames
+                    self._cache_failed_count[guild_id] = 0
+                    return (
+                        list(persisted_by_username.values()),
+                        0,
+                        0,
+                        True,
+                    )
+            else:
+                persisted_profiles = []
 
         elif allow_recent_force_reuse:
             if self._cache_is_valid(
@@ -1326,6 +1268,11 @@ class LeaderboardCommands(commands.Cog):
                     ),
                     True,
                 )
+
+        if force_refresh:
+            persisted_profiles, _ = await load_profile_snapshots(
+                registered_usernames
+            )
 
         async with self._get_refresh_lock(guild_id):
             # Recheck after waiting. Another request may already have
@@ -1377,6 +1324,7 @@ class LeaderboardCommands(commands.Cog):
                     guild_id=guild_id,
                     season_id=season_id,
                     players=players,
+                    fallback_profiles=persisted_profiles,
                 )
             )
 
@@ -1459,8 +1407,9 @@ class LeaderboardCommands(commands.Cog):
             )
             return
 
-        players = await get_season_players(
-            season["id"]
+        players = await get_registered_players_with_links(
+            guild_id,
+            int(season["id"]),
         )
 
         if not players:
@@ -1520,15 +1469,22 @@ class LeaderboardCommands(commands.Cog):
             await interaction.followup.send(embed=view.build_embed(), view=view)
             return
 
-        entries = await build_season_archive_entries(
+        (
+            profiles,
+            refreshed_count,
+            failed_count,
+            cache_hit,
+        ) = await self.get_leaderboard_profiles(
+            guild_id=guild_id,
             season_id=int(season["id"]),
             players=players,
+        )
+        entries = self.build_entries(
+            profiles=profiles,
+            tracked_player_count=int(season["tracked_player_count"]),
             metric=statistic.value,
             minimum_games=minimum_games,
         )
-        refreshed_count = 0
-        failed_count = 0
-        cache_hit = True
 
         total_qualifying_before_limit = len(entries)
 
@@ -1551,7 +1507,7 @@ class LeaderboardCommands(commands.Cog):
             refreshed_count=refreshed_count,
             failed_count=failed_count,
             cache_hit=cache_hit,
-            cache_age_seconds=0,
+            cache_age_seconds=self._cache_age_seconds(guild_id),
             requesting_user_id=interaction.user.id,
         )
 
@@ -1562,7 +1518,7 @@ class LeaderboardCommands(commands.Cog):
 
     @app_commands.command(
         name="leaderboard-refresh",
-        description="Checks the active season's stored leaderboard data.",
+        description="Refreshes every registered player's website statistics.",
     )
     @bot_admin_only()
     async def leaderboard_refresh(
@@ -1586,8 +1542,9 @@ class LeaderboardCommands(commands.Cog):
             )
             return
 
-        players = await get_season_players(
-            season["id"]
+        players = await get_registered_players_with_links(
+            guild_id,
+            int(season["id"]),
         )
 
         if not players:
@@ -1597,21 +1554,21 @@ class LeaderboardCommands(commands.Cog):
             )
             return
 
-        rows = await season_rows(int(season["id"]))
-        participant_names = {
-            str(participant["username"]).casefold()
-            for row in rows
-            for participant in unpack(row)
-        }
-        await interaction.response.send_message(
+        await interaction.response.defer(thinking=True, ephemeral=True)
+        profiles, refreshed, failed, _ = await self.get_leaderboard_profiles(
+            guild_id=guild_id,
+            season_id=int(season["id"]),
+            players=players,
+            force_refresh=True,
+            allow_recent_force_reuse=False,
+        )
+        await interaction.followup.send(
             (
-                f"Leaderboard database is ready for "
+                f"Website statistics refreshed for "
                 f"{season_display_name(season)}.\n"
-                f"Stored matches: **{len(rows):,}**\n"
-                f"Players seen in matches: **{len(participant_names):,}**\n"
-                f"Registered players: **{len(players):,}**\n"
-                "No ProAvalon profile scraping was performed. Every new archived "
-                "match updates the leaderboard automatically."
+                f"Successfully refreshed: **{refreshed:,}**\n"
+                f"Failed live requests: **{failed:,}**\n"
+                f"Profiles available (including saved fallbacks): **{len(profiles):,}**"
             ),
             ephemeral=True,
         )
@@ -2068,8 +2025,9 @@ class DailyLeaderboardCommands(
         if season is None:
             return
 
-        players = await get_season_players(
-            season["id"]
+        players = await get_registered_players_with_links(
+            guild_id,
+            int(season["id"]),
         )
 
         if not players:
@@ -2102,9 +2060,16 @@ class DailyLeaderboardCommands(
             ]
             entries = sort_entries(entries, metric)
         else:
-            entries = await build_season_archive_entries(
+            profiles, _, _, _ = await leaderboard_cog.get_leaderboard_profiles(
+                guild_id=guild_id,
                 season_id=int(season["id"]),
                 players=players,
+                force_refresh=True,
+                allow_recent_force_reuse=True,
+            )
+            entries = leaderboard_cog.build_entries(
+                profiles=profiles,
+                tracked_player_count=int(season["tracked_player_count"]),
                 metric=metric,
                 minimum_games=minimum_games,
             )
