@@ -586,6 +586,17 @@ class ProAvalonRatingTracker:
 
             canonical = json.dumps({"room":room_id,"players":[x.casefold() for x in real_players],"winner":data.get("winner"),"missions":data.get("missionHistory"),"votes":data.get("voteHistory")}, sort_keys=True, separators=(",",":"))
             fingerprint = hashlib.sha256(canonical.encode()).hexdigest()
+            public_cards = ((data.get("publicData") or {}).get("cards") or {})
+            card_history = {}
+            if isinstance(public_cards, dict):
+                for card_key, card_data in public_cards.items():
+                    if isinstance(card_data, dict):
+                        history = card_data.get("history") or []
+                        if isinstance(history, list):
+                            card_history[str(card_data.get("name") or card_key)] = [
+                                str(value) for value in history
+                                if isinstance(value, str) and value.strip()
+                            ]
             for sid, season in state["seasons"].items():
                 match_id = await save_match(
                     season_id=sid,
@@ -600,6 +611,7 @@ class ProAvalonRatingTracker:
                     players=real_players,
                     roles=roles,
                     rating_changes=changes,
+                    card_history=card_history,
                     game_duration_seconds=game_duration_seconds,
                     assassination_duration_seconds=shot_duration_seconds,
                 )

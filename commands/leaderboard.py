@@ -42,10 +42,8 @@ from utils.permissions import bot_admin_only
 PAGE_SIZE = 15
 DEFAULT_MINIMUM_GAMES = 5
 
-# Keep a hot in-memory copy for two hours. After that, normal commands reload
-# the persistent database snapshot rather than scraping ProAvalon.
-# Website profiles are reused briefly so ordinary commands stay responsive,
-# but never for hours after new games have changed public statistics.
+# Leaderboard commands never wait on ProAvalon. Website profiles are refreshed
+# separately and persisted; command execution is a database read plus sorting.
 LEADERBOARD_CACHE_SECONDS = 15 * 60
 
 # If the daily scheduled post happens right after another refresh, reuse
@@ -1023,6 +1021,7 @@ class LeaderboardCommands(commands.Cog):
                 self._start_rating_tracker_when_ready()
             )
         )
+        self._profile_sync_loop.start()
 
     async def _start_rating_tracker_when_ready(
         self,
@@ -1037,6 +1036,34 @@ class LeaderboardCommands(commands.Cog):
         asyncio.create_task(
             self.rating_tracker.stop()
         )
+        self._profile_sync_loop.cancel()
+
+    @tasks.loop(hours=6)
+    async def _profile_sync_loop(self) -> None:
+        """Refresh saved website totals without delaying leaderboard commands."""
+        for guild in self.bot.guilds:
+            season = await get_active_season(guild.id)
+            if season is None:
+                continue
+            players = await get_registered_players_with_links(
+                guild.id, int(season["id"])
+            )
+            if not players:
+                continue
+            try:
+                await self.get_leaderboard_profiles(
+                    guild_id=guild.id,
+                    season_id=int(season["id"]),
+                    players=players,
+                    force_refresh=True,
+                    allow_recent_force_reuse=True,
+                )
+            except Exception as error:
+                print(f"Background leaderboard profile sync failed: {error!r}")
+
+    @_profile_sync_loop.before_loop
+    async def _before_profile_sync_loop(self) -> None:
+        await self.bot.wait_until_ready()
 
     def _get_refresh_lock(
         self,
@@ -1221,32 +1248,25 @@ class LeaderboardCommands(commands.Cog):
                 for profile in persisted_profiles
             }
             if persisted_by_username:
-                missing_count = len(registered_usernames.difference(persisted_by_username))
-                persisted_is_fresh = (
-                    persisted_age is not None
-                    and float(persisted_age) < LEADERBOARD_CACHE_SECONDS
+                self._cached_profiles[guild_id] = persisted_by_username
+                self._cache_refreshed_at[guild_id] = time.monotonic() - float(
+                    persisted_age or 0
                 )
-                if not persisted_is_fresh or missing_count:
-                    # Keep old snapshots only as a per-player fallback if a
-                    # live website request fails. Do not present the entire
-                    # stale snapshot as a successful current leaderboard.
-                    pass
-                else:
-                    self._cached_profiles[guild_id] = persisted_by_username
-                    self._cache_refreshed_at[guild_id] = time.monotonic() - float(
-                        persisted_age or 0
-                    )
-                    self._cache_season_id[guild_id] = season_id
-                    self._cache_registered_usernames[guild_id] = registered_usernames
-                    self._cache_failed_count[guild_id] = 0
-                    return (
-                        list(persisted_by_username.values()),
-                        0,
-                        0,
-                        True,
-                    )
+                self._cache_season_id[guild_id] = season_id
+                self._cache_registered_usernames[guild_id] = registered_usernames
+                self._cache_failed_count[guild_id] = len(
+                    registered_usernames.difference(persisted_by_username)
+                )
+                return (
+                    list(persisted_by_username.values()),
+                    0,
+                    self._cache_failed_count[guild_id],
+                    True,
+                )
             else:
-                persisted_profiles = []
+                # No website I/O is allowed on the command path. The
+                # background sync or /leaderboard-refresh will populate it.
+                return [], 0, len(registered_usernames), True
 
         elif allow_recent_force_reuse:
             if self._cache_is_valid(

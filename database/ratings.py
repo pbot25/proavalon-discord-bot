@@ -181,6 +181,18 @@ async def upsert_online_ratings(
                 for username, rating, bracket in cleaned
             ],
         )
+        await database.executemany(
+            """
+            INSERT INTO proavalon_rating_extremes(
+                proavalon_username, minimum_rating, maximum_rating, updated_at
+            ) VALUES (?, ?, ?, ?)
+            ON CONFLICT(proavalon_username) DO UPDATE SET
+                minimum_rating = MIN(minimum_rating, excluded.minimum_rating),
+                maximum_rating = MAX(maximum_rating, excluded.maximum_rating),
+                updated_at = excluded.updated_at
+            """,
+            [(username, rating, rating, now) for username, rating, _ in cleaned],
+        )
         await database.commit()
     finally:
         await database.close()
@@ -197,3 +209,43 @@ async def upsert_online_ratings(
         )
 
     return len(cleaned)
+
+
+async def get_rating_extremes(username: str) -> tuple[int | None, int | None]:
+    """Return the lowest/highest rating observed by Pbot for a player."""
+    database = await connect()
+    try:
+        cursor = await database.execute(
+            """
+            SELECT minimum_rating, maximum_rating
+            FROM proavalon_rating_extremes
+            WHERE proavalon_username = ? COLLATE NOCASE
+            """,
+            (username.strip(),),
+        )
+        row = await cursor.fetchone()
+        if row is not None:
+            return int(row["minimum_rating"]), int(row["maximum_rating"])
+
+        # Backfill older seasons from archived before/after match ratings.
+        cursor = await database.execute(
+            "SELECT rating_changes_json FROM season_matches "
+            "WHERE rating_changes_json IS NOT NULL"
+        )
+        values: list[int] = []
+        target = username.strip().casefold()
+        for match in await cursor.fetchall():
+            try:
+                changes = __import__("json").loads(match["rating_changes_json"])
+            except (TypeError, ValueError):
+                continue
+            for change in changes if isinstance(changes, list) else []:
+                if str(change.get("username", "")).casefold() != target:
+                    continue
+                for key in ("before", "after"):
+                    value = change.get(key)
+                    if isinstance(value, (int, float)) and not isinstance(value, bool):
+                        values.append(int(value))
+        return (min(values), max(values)) if values else (None, None)
+    finally:
+        await database.close()

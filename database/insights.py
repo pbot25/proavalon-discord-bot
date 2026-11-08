@@ -349,6 +349,72 @@ def season_overview_summary(rows):
         1 for row in matches if str(row["youtube_url"] or "").strip()
     )
 
+    m1_passes = 0
+    m1_fails = 0
+    m1_hammer = {"Resistance": 0, "Spy": 0, "Unknown": 0}
+    card_starts = {"Resistance": 0, "Spy": 0, "Unknown": 0}
+    card_transitions = {
+        "Resistance→Resistance": [0, 0],
+        "Resistance→Spy": [0, 0],
+        "Spy→Resistance": [0, 0],
+        "Spy→Spy": [0, 0],
+    }
+
+    def row_value(row, key, default=None):
+        try:
+            return row[key]
+        except (KeyError, IndexError):
+            return default
+
+    for row in matches:
+        missions = _j(row_value(row, "mission_history_json"), [])
+        if missions:
+            if str(missions[0]).casefold() == "succeeded":
+                m1_passes += 1
+            elif str(missions[0]).casefold() == "failed":
+                m1_fails += 1
+
+        players = _j(row_value(row, "players_json"), [])
+        roles = _j(row_value(row, "roles_json"), [])
+        alignments = {
+            str(name).casefold(): alignment(roles[index])
+            for index, name in enumerate(players)
+            if index < len(roles)
+        }
+        votes = _j(row_value(row, "vote_history_json"), {})
+        hammer_leader = None
+        for name in players:
+            history = votes.get(name) or votes.get(str(name).casefold()) or []
+            picks = history[0] if history and isinstance(history[0], list) else []
+            if len(picks) >= 5 and "VHleader" in str(picks[4]):
+                hammer_leader = str(name)
+                break
+        if hammer_leader is not None:
+            m1_hammer[alignments.get(hammer_leader.casefold()) or "Unknown"] += 1
+
+        card_data = _j(
+            row_value(row, "card_history_json"),
+            {},
+        )
+        ref_history = []
+        for card_name, history in card_data.items() if isinstance(card_data, dict) else []:
+            normalized = str(card_name).replace("_", " ").replace("-", " ").casefold()
+            if "ref" in normalized and "rain" in normalized:
+                ref_history = history if isinstance(history, list) else []
+                break
+        holder_alignments = [
+            alignments.get(str(name).casefold()) or "Unknown"
+            for name in ref_history
+        ]
+        if holder_alignments:
+            card_starts[holder_alignments[0]] += 1
+        winner = winner_norm(row_value(row, "winner"))
+        for first, second in zip(holder_alignments, holder_alignments[1:]):
+            key = f"{first}→{second}"
+            if key in card_transitions:
+                card_transitions[key][0] += 1
+                card_transitions[key][1] += int(winner == "Spy")
+
     durations = [seconds for seconds, _ in timed_matches]
     shortest = min(timed_matches, key=lambda item: item[0], default=None)
     longest = max(timed_matches, key=lambda item: item[0], default=None)
@@ -377,6 +443,11 @@ def season_overview_summary(rows):
         "timed_assassinations": len(assassination_times),
         "average_missions": mean(mission_counts) if mission_counts else None,
         "youtube_matches": youtube_matches,
+        "m1_passes": m1_passes,
+        "m1_fails": m1_fails,
+        "m1_hammer": m1_hammer,
+        "card_starts": card_starts,
+        "card_transitions": card_transitions,
     }
 
 def relationships(rows,username):

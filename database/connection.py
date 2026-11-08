@@ -629,6 +629,15 @@ async def initialize_database() -> None:
         # full schema script runs against an older production database.
         await _migrate_season_match_ids(database)
         await _migrate_match_durations(database)
+        columns = (
+            await _table_columns(database, "season_matches")
+            if await _table_exists(database, "season_matches")
+            else set()
+        )
+        if columns and "card_history_json" not in columns:
+            await database.execute(
+                "ALTER TABLE season_matches ADD COLUMN card_history_json TEXT"
+            )
         await _migrate_recording_integration_reminders(database)
         await database.executescript(SCHEMA)
         await _repair_account_link_season_scopes(database)

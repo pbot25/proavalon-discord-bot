@@ -213,6 +213,7 @@ CREATE TABLE IF NOT EXISTS season_matches (
     players_json TEXT NOT NULL,
     roles_json TEXT,
     rating_changes_json TEXT,
+    card_history_json TEXT,
     game_duration_seconds REAL,
     assassination_duration_seconds REAL,
     posted_at TEXT,
@@ -233,6 +234,13 @@ ON season_matches(community_season_id, season_match_id);
 
 CREATE INDEX IF NOT EXISTS proavalon_ratings_updated
 ON proavalon_ratings(rating_updated_at);
+
+CREATE TABLE IF NOT EXISTS proavalon_rating_extremes (
+    proavalon_username TEXT PRIMARY KEY COLLATE NOCASE,
+    minimum_rating INTEGER NOT NULL,
+    maximum_rating INTEGER NOT NULL,
+    updated_at TEXT NOT NULL
+);
 
 
 CREATE TABLE IF NOT EXISTS proavalon_profile_snapshots (

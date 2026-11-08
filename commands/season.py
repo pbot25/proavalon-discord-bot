@@ -1533,6 +1533,39 @@ class SeasonCommands(
             inline=False,
         )
 
+        m1_total = summary["m1_passes"] + summary["m1_fails"]
+        embed.add_field(
+            name="Mission 1",
+            value=(
+                f"**Passes:** {summary['m1_passes']:,} "
+                f"({summary['m1_passes'] / m1_total * 100 if m1_total else 0:.1f}%)\n"
+                f"**Fails:** {summary['m1_fails']:,} "
+                f"({summary['m1_fails'] / m1_total * 100 if m1_total else 0:.1f}%)\n"
+                f"**Hammer leader:** Resistance {summary['m1_hammer']['Resistance']:,} • "
+                f"Spy {summary['m1_hammer']['Spy']:,} • "
+                f"Unknown {summary['m1_hammer']['Unknown']:,}"
+            ),
+            inline=False,
+        )
+
+        starts = summary["card_starts"]
+        transition_lines = []
+        for label, (games, spy_wins) in summary["card_transitions"].items():
+            transition_lines.append(
+                f"**{label}:** {games:,} • Spy WR "
+                f"{spy_wins / games * 100 if games else 0:.1f}%"
+            )
+        embed.add_field(
+            name="Ref of the Rain Card",
+            value=(
+                f"**Starting holder:** Resistance {starts['Resistance']:,} • "
+                f"Spy {starts['Spy']:,} • Unknown {starts['Unknown']:,}\n"
+                + "\n".join(transition_lines)
+                + "\n*Card history coverage begins with matches recorded after this update.*"
+            ),
+            inline=False,
+        )
+
         await interaction.response.send_message(embed=embed)
 
     @app_commands.command(

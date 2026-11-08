@@ -7,7 +7,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from database.account_links import get_preferred_link_for_discord
-from database.ratings import get_cached_rating
+from database.ratings import get_cached_rating, get_rating_extremes
 from database.voting_metrics import get_player_voting_metrics
 from database.social_stats import (
     MIN_SHARED_GAMES,
@@ -518,6 +518,8 @@ def build_profile_embed(
     numeric_rating: int | None = None,
     rating_updated_at: str | None = None,
     live_rating_bracket: str | None = None,
+    minimum_rating: int | None = None,
+    maximum_rating: int | None = None,
 ) -> discord.Embed:
     game_size_key = f"{tracked_player_count}p"
 
@@ -652,6 +654,16 @@ def build_profile_embed(
     embed.add_field(
         name="Rating",
         value=rating_value,
+        inline=True,
+    )
+
+    embed.add_field(
+        name="Observed Rating Range",
+        value=(
+            f"**Low:** {minimum_rating:,}\n**High:** {maximum_rating:,}"
+            if minimum_rating is not None and maximum_rating is not None
+            else "Not observed yet"
+        ),
         inline=True,
     )
 
@@ -1656,6 +1668,9 @@ class StatsCommands(
             profile.username
         )
 
+        minimum_rating, maximum_rating = await get_rating_extremes(
+            profile.username
+        )
         profile_embed = build_profile_embed(
                 profile=profile,
                 cache_hit=cache_hit,
@@ -1676,6 +1691,8 @@ class StatsCommands(
                     if rating_snapshot is not None
                     else None
                 ),
+                minimum_rating=minimum_rating,
+                maximum_rating=maximum_rating,
             )
 
         if active_season is not None:

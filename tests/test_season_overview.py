@@ -63,6 +63,29 @@ class SeasonOverviewTests(unittest.TestCase):
         self.assertEqual(summary["resistance_win_rate"], 0.0)
         self.assertEqual(summary["spy_win_rate"], 0.0)
 
+    def test_m1_hammer_and_card_metrics(self) -> None:
+        players = ["ResA", "SpyA"]
+        rows = [{
+            "season_match_id": 1,
+            "winner": "Spy",
+            "game_duration_seconds": 600,
+            "assassination_duration_seconds": None,
+            "mission_history_json": '["failed"]',
+            "youtube_url": None,
+            "players_json": '["ResA", "SpyA"]',
+            "roles_json": '["Resistance", "Assassin"]',
+            "vote_history_json": (
+                '{"ResA":[["", "", "", "", ""]],'
+                '"SpyA":[["", "", "", "", "VHleader"]]}'
+            ),
+            "card_history_json": '{"Ref of the Rain":["SpyA", "ResA"]}',
+        }]
+        summary = season_overview_summary(rows)
+        self.assertEqual(summary["m1_fails"], 1)
+        self.assertEqual(summary["m1_hammer"]["Spy"], 1)
+        self.assertEqual(summary["card_starts"]["Spy"], 1)
+        self.assertEqual(summary["card_transitions"]["Spy→Resistance"], [1, 1])
+
 
 if __name__ == "__main__":
     unittest.main()
