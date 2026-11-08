@@ -212,7 +212,7 @@ async def upsert_online_ratings(
 
 
 async def get_rating_extremes(username: str) -> tuple[int | None, int | None]:
-    """Return the lowest/highest rating observed by Pbot for a player."""
+    """Return extremes merged from live observations and archived matches."""
     database = await connect()
     try:
         cursor = await database.execute(
@@ -224,15 +224,18 @@ async def get_rating_extremes(username: str) -> tuple[int | None, int | None]:
             (username.strip(),),
         )
         row = await cursor.fetchone()
+        values: list[int] = []
         if row is not None:
-            return int(row["minimum_rating"]), int(row["maximum_rating"])
+            values.extend(
+                [int(row["minimum_rating"]), int(row["maximum_rating"])]
+            )
 
-        # Backfill older seasons from archived before/after match ratings.
+        # Always merge archived before/after ratings. This ensures a new live
+        # observation cannot hide a pre-deployment season high or low.
         cursor = await database.execute(
             "SELECT rating_changes_json FROM season_matches "
             "WHERE rating_changes_json IS NOT NULL"
         )
-        values: list[int] = []
         target = username.strip().casefold()
         for match in await cursor.fetchall():
             try:
@@ -246,6 +249,25 @@ async def get_rating_extremes(username: str) -> tuple[int | None, int | None]:
                     value = change.get(key)
                     if isinstance(value, (int, float)) and not isinstance(value, bool):
                         values.append(int(value))
-        return (min(values), max(values)) if values else (None, None)
+        if not values:
+            return None, None
+
+        minimum = min(values)
+        maximum = max(values)
+        now = utc_now()
+        await database.execute(
+            """
+            INSERT INTO proavalon_rating_extremes(
+                proavalon_username, minimum_rating, maximum_rating, updated_at
+            ) VALUES (?, ?, ?, ?)
+            ON CONFLICT(proavalon_username) DO UPDATE SET
+                minimum_rating = MIN(minimum_rating, excluded.minimum_rating),
+                maximum_rating = MAX(maximum_rating, excluded.maximum_rating),
+                updated_at = excluded.updated_at
+            """,
+            (username.strip(), minimum, maximum, now),
+        )
+        await database.commit()
+        return minimum, maximum
     finally:
         await database.close()
