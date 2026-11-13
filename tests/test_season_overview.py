@@ -82,9 +82,33 @@ class SeasonOverviewTests(unittest.TestCase):
         }]
         summary = season_overview_summary(rows)
         self.assertEqual(summary["m1_fails"], 1)
+        self.assertEqual(summary["m1_outcomes"]["Fail"], [1, 0, 1])
         self.assertEqual(summary["m1_hammer"]["Spy"], 1)
+        self.assertEqual(summary["m1_hammer_outcomes"]["Spy"], [1, 0, 1])
         self.assertEqual(summary["card_starts"]["Spy"], 1)
+        self.assertEqual(summary["card_start_outcomes"]["Spy"], [1, 0, 1])
         self.assertEqual(summary["card_transitions"]["Spy→Resistance"], [1, 1])
+
+    def test_uses_backfilled_hammer_when_vote_history_was_compacted(self) -> None:
+        rows = [{
+            "season_match_id": 2,
+            "winner": "Resistance",
+            "game_duration_seconds": 600,
+            "assassination_duration_seconds": None,
+            "mission_history_json": '["succeeded"]',
+            "youtube_url": None,
+            "players_json": '["ResA", "SpyA"]',
+            "roles_json": '["Resistance", "Assassin"]',
+            "vote_history_json": None,
+            "card_history_json": None,
+            "m1_hammer_username": "ResA",
+            "m1_hammer_alignment": "Resistance",
+        }]
+        summary = season_overview_summary(rows)
+        self.assertEqual(summary["m1_hammer"]["Resistance"], 1)
+        self.assertEqual(
+            summary["m1_hammer_outcomes"]["Resistance"], [1, 1, 0]
+        )
 
 
 if __name__ == "__main__":

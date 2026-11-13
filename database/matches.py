@@ -42,6 +42,9 @@ async def save_match(
     vote_history,
     players,
     roles,
+    assassin_shots,
+    m1_hammer_username,
+    m1_hammer_alignment,
     rating_changes,
     card_history=None,
     game_duration_seconds: float | None = None,
@@ -89,10 +92,11 @@ async def save_match(
                 community_season_id, season_match_id, match_fingerprint,
                 room_id, detected_at, finished_at, winner, game_mode,
                 mission_history_json, fails_history_json, vote_history_json,
-                players_json, roles_json, rating_changes_json,
+                players_json, roles_json, assassin_shots_json,
+                m1_hammer_username, m1_hammer_alignment, rating_changes_json,
                 game_duration_seconds, assassination_duration_seconds,
                 card_history_json
-            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 season_id, match_id, fingerprint, room_id, detected_at,
@@ -101,6 +105,9 @@ async def save_match(
                 json.dumps(vote_history) if vote_history is not None else None,
                 json.dumps(players),
                 json.dumps(roles) if roles is not None else None,
+                json.dumps(assassin_shots) if assassin_shots is not None else None,
+                m1_hammer_username,
+                m1_hammer_alignment,
                 json.dumps(rating_changes),
                 game_duration_seconds,
                 assassination_duration_seconds,

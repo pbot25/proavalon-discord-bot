@@ -11,6 +11,10 @@ from database.insights import active_or_latest,season_rows,recent_rows,find_matc
 from utils.permissions import bot_admin_only
 from database.account_links import get_preferred_link_for_discord
 from database.social_stats import build_player_social_stats, get_season_matches
+from database.assassination_stats import (
+    ROLE_BUCKETS,
+    get_player_merlin_shot_stats,
+)
 from commands.stats import (
     HISTORY_ROLE_CHOICES,
     SOCIAL_LIST_CHOICES,
@@ -38,6 +42,17 @@ def fmt_duration(seconds):
     if hours:
         return f"{hours}h {minutes}m {remaining_seconds}s"
     return f"{minutes}m {remaining_seconds}s"
+
+
+def format_outcome_split(values) -> str:
+    games, resistance_wins, spy_wins = (int(value) for value in values)
+    known = resistance_wins + spy_wins
+    resistance_rate = resistance_wins / known * 100 if known else 0.0
+    spy_rate = spy_wins / known * 100 if known else 0.0
+    return (
+        f"{games:,} games • Res WR {resistance_rate:.1f}% • "
+        f"Spy WR {spy_rate:.1f}%"
+    )
 
 async def player_auto(interaction,current):
     if interaction.guild_id is None: return []
@@ -977,6 +992,144 @@ class PastSeason(commands.GroupCog, group_name="past-season", group_description=
         e.add_field(name="Started", value=fmt_date(season["started_at"]), inline=True)
         e.add_field(name="Ended", value=fmt_date(season["ended_at"]) if season["ended_at"] else "Still active", inline=True)
         await interaction.response.send_message(embed=e)
+
+    @app_commands.command(
+        name="stats",
+        description="Shows detailed outcome, hammer, and card stats for a past season.",
+    )
+    @app_commands.describe(season_prefix="Season prefix, for example s4.")
+    async def advanced_stats(
+        self,
+        interaction: discord.Interaction,
+        season_prefix: str,
+    ):
+        season = await self._season(interaction, season_prefix)
+        if not season:
+            return await interaction.response.send_message(
+                "That season prefix was not found.", ephemeral=True
+            )
+        summary = season_overview_summary(await season_rows(int(season["id"])))
+        embed = discord.Embed(
+            title=f"{season_display_name(season)} — Detailed Statistics",
+            description=f"Based on **{summary['matches']:,}** archived matches.",
+            color=discord.Color.blurple(),
+        )
+        m1_total = summary["m1_passes"] + summary["m1_fails"]
+        embed.add_field(
+            name="Mission 1 Outcomes",
+            value=(
+                f"**Passes:** {summary['m1_passes']:,} "
+                f"({summary['m1_passes'] / m1_total * 100 if m1_total else 0:.1f}%)\n"
+                f"↳ {format_outcome_split(summary['m1_outcomes']['Pass'])}\n"
+                f"**Fails:** {summary['m1_fails']:,} "
+                f"({summary['m1_fails'] / m1_total * 100 if m1_total else 0:.1f}%)\n"
+                f"↳ {format_outcome_split(summary['m1_outcomes']['Fail'])}"
+            ),
+            inline=False,
+        )
+        hammer_lines = [
+            f"**Resistance hammer:** "
+            f"{format_outcome_split(summary['m1_hammer_outcomes']['Resistance'])}",
+            f"**Spy hammer:** "
+            f"{format_outcome_split(summary['m1_hammer_outcomes']['Spy'])}",
+        ]
+        if summary["m1_hammer"]["Unknown"]:
+            hammer_lines.append(
+                f"**Unknown hammer:** "
+                f"{format_outcome_split(summary['m1_hammer_outcomes']['Unknown'])}"
+            )
+        embed.add_field(
+            name="Mission 1 Hammer",
+            value="\n".join(hammer_lines),
+            inline=False,
+        )
+        start_lines = [
+            f"**Starts with Resistance:** "
+            f"{format_outcome_split(summary['card_start_outcomes']['Resistance'])}",
+            f"**Starts with Spy:** "
+            f"{format_outcome_split(summary['card_start_outcomes']['Spy'])}",
+        ]
+        if summary["card_starts"]["Unknown"]:
+            start_lines.append(
+                f"**Unknown starting holder:** "
+                f"{format_outcome_split(summary['card_start_outcomes']['Unknown'])}"
+            )
+        embed.add_field(
+            name="Ref of the Rain — Starting Holder",
+            value="\n".join(start_lines),
+            inline=False,
+        )
+        transition_lines = []
+        for label, (games, spy_wins) in summary["card_transitions"].items():
+            transition_lines.append(
+                f"**{label}:** "
+                f"{format_outcome_split([games, games - spy_wins, spy_wins])}"
+            )
+        embed.add_field(
+            name="Ref of the Rain — Transfers",
+            value="\n".join(transition_lines),
+            inline=False,
+        )
+        embed.set_footer(
+            text="Recovered archive data is included automatically."
+        )
+        await interaction.response.send_message(embed=embed)
+
+    @app_commands.command(
+        name="merlin-shots",
+        description="Shows a player's Merlin-target history in a past season.",
+    )
+    @app_commands.describe(
+        season_prefix="Season prefix, for example s4.",
+        username="Player name. Leave blank to use your linked account.",
+        discord_user="Linked Discord user to inspect.",
+    )
+    async def merlin_shots(
+        self,
+        interaction: discord.Interaction,
+        season_prefix: str,
+        username: str | None = None,
+        discord_user: discord.Member | None = None,
+    ):
+        season = await self._season(interaction, season_prefix)
+        if not season:
+            return await interaction.response.send_message(
+                "That season prefix was not found.", ephemeral=True
+            )
+        resolved, error = await self._player(
+            interaction, season, username, discord_user
+        )
+        if error:
+            return await interaction.response.send_message(error, ephemeral=True)
+        stats = await get_player_merlin_shot_stats(int(season["id"]), resolved)
+        lines = []
+        for role in ROLE_BUCKETS:
+            games = stats.games_by_role[role]
+            shots = stats.shots_by_role[role]
+            rate = shots / games * 100 if games else 0.0
+            lines.append(
+                f"**{role}:** {shots:,} shots / {games:,} games ({rate:.1f}%)"
+            )
+        false_rate = (
+            stats.false_merlin_shots / stats.non_merlin_games * 100
+            if stats.non_merlin_games else 0.0
+        )
+        embed = discord.Embed(
+            title=(
+                f"{resolved} — {season_display_name(season)} Merlin Shots"
+            ),
+            description=(
+                "\n".join(lines)
+                + "\n\n"
+                + f"**False Merlin shots:** {stats.false_merlin_shots:,} / "
+                f"{stats.non_merlin_games:,} non-Merlin Resistance games "
+                f"({false_rate:.1f}%)\n"
+                + f"**All Merlin-target selections:** {stats.total_shots:,}"
+            ),
+            color=discord.Color.blurple(),
+        )
+        embed.set_footer(text="Recovered archive data is included automatically.")
+        await interaction.response.send_message(embed=embed)
 
     @app_commands.command(name="recent", description="Shows recent matches from a previous season.")
     @app_commands.describe(season_prefix="Season prefix, for example s4 or r1.")

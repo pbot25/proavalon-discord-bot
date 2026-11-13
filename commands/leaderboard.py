@@ -16,6 +16,7 @@ from database.leaderboard_profiles import (
     save_profile_snapshot,
 )
 from database.voting_metrics import get_season_voting_metrics
+from database.assassination_stats import get_season_merlin_shot_stats
 from database.seasons import (
     get_active_season,
     season_display_name,
@@ -63,6 +64,10 @@ LEADERBOARD_CHOICES = [
     app_commands.Choice(name="Rating", value="rating"),
     app_commands.Choice(name="Crit Voting Accuracy", value="crit_accuracy"),
     app_commands.Choice(name="Crit Errors", value="crit_errors"),
+    app_commands.Choice(
+        name="False Merlin Shots",
+        value="false_merlin_shots",
+    ),
     app_commands.Choice(name="Overall WR", value="overall"),
     app_commands.Choice(name="Resistance WR", value="resistance"),
     app_commands.Choice(name="Spy WR", value="spy"),
@@ -78,7 +83,10 @@ LEADERBOARD_CHOICES = [
 
 # Every statistic supported by /leaderboard is also available for
 # automatic daily leaderboards.
-DAILY_LEADERBOARD_CHOICES = list(LEADERBOARD_CHOICES)
+DAILY_LEADERBOARD_CHOICES = [
+    choice for choice in LEADERBOARD_CHOICES
+    if choice.value != "false_merlin_shots"
+]
 
 DISPLAY_NAMES = {
     "total_time": "Total Time Played",
@@ -86,6 +94,7 @@ DISPLAY_NAMES = {
     "rating": "Rating",
     "crit_accuracy": "Crit Voting Accuracy",
     "crit_errors": "Crit Errors",
+    "false_merlin_shots": "False Merlin Shots",
     "overall": "Overall Win Rate",
     "resistance": "Resistance Win Rate",
     "spy": "Spy Win Rate",
@@ -348,6 +357,17 @@ def sort_entries(
             ),
         )
 
+    if metric == "false_merlin_shots":
+        return sorted(
+            entries,
+            key=lambda entry: (
+                -entry.wins,
+                -entry.win_rate,
+                -entry.games,
+                entry.username.casefold(),
+            ),
+        )
+
     if metric == "total_time":
         return sorted(
             entries,
@@ -484,7 +504,11 @@ def build_page_description(
         f"{entry.games:,}"
         for entry in page_entries
     ]
-    games_header = "Votes" if metric in {"crit_accuracy", "crit_errors"} else "GP"
+    games_header = (
+        "Votes" if metric in {"crit_accuracy", "crit_errors"}
+        else "Res GP" if metric == "false_merlin_shots"
+        else "GP"
+    )
     games_width = max(
         len(games_header),
         max(len(text) for text in games_texts),
@@ -503,6 +527,12 @@ def build_page_description(
         metric_texts = [
             f"{(entry.crit_errors / entry.games * 100):.1f}% ({entry.crit_errors})"
             if entry.games else "N/A"
+            for entry in page_entries
+        ]
+    elif metric == "false_merlin_shots":
+        metric_header = "Shots"
+        metric_texts = [
+            f"{entry.wins:,} ({entry.win_rate:.1f}%)"
             for entry in page_entries
         ]
     elif metric == "rating":
@@ -641,7 +671,11 @@ def build_daily_table(
         f"{entry.games:,}"
         for entry in entries
     ]
-    games_header = "Votes" if metric in {"crit_accuracy", "crit_errors"} else "GP"
+    games_header = (
+        "Votes" if metric in {"crit_accuracy", "crit_errors"}
+        else "Res GP" if metric == "false_merlin_shots"
+        else "GP"
+    )
     games_width = max(
         len(games_header),
         max(len(value) for value in games_texts),
@@ -658,6 +692,12 @@ def build_daily_table(
         metric_texts = [
             f"{(entry.crit_errors / entry.games * 100):.1f}% ({entry.crit_errors})"
             if entry.games else "N/A"
+            for entry in entries
+        ]
+    elif metric == "false_merlin_shots":
+        metric_header = "Shots"
+        metric_texts = [
+            f"{entry.wins:,} ({entry.win_rate:.1f}%)"
             for entry in entries
         ]
     elif metric == "rating":
@@ -903,7 +943,13 @@ class LeaderboardView(discord.ui.View):
         footer_parts = [
             showing_text,
             f"Page {self.page + 1}/{self.total_pages}",
-            (f"Minimum votes: {self.minimum_games}" if self.metric in {"crit_accuracy", "crit_errors"} else f"Minimum games: {self.minimum_games}"),
+            (
+                f"Minimum votes: {self.minimum_games}"
+                if self.metric in {"crit_accuracy", "crit_errors"}
+                else f"Minimum non-Merlin Resistance games: {self.minimum_games}"
+                if self.metric == "false_merlin_shots"
+                else f"Minimum games: {self.minimum_games}"
+            ),
         ]
 
         if self.requested_limit is not None:
@@ -1011,6 +1057,8 @@ class LeaderboardCommands(commands.Cog):
         ] = {}
         self._cache_failed_count: dict[int, int] = {}
         self._refresh_locks: dict[int, asyncio.Lock] = {}
+        self._socket_refresh_task: asyncio.Task | None = None
+        self._last_socket_refresh_at = 0.0
 
         self.rating_tracker = ProAvalonRatingTracker(
             bot.proavalon_scraper,
@@ -1037,29 +1085,76 @@ class LeaderboardCommands(commands.Cog):
             self.rating_tracker.stop()
         )
         self._profile_sync_loop.cancel()
+        if self._socket_refresh_task is not None:
+            self._socket_refresh_task.cancel()
+
+    async def refresh_current_season_profiles(
+        self,
+        guild_id: int,
+        *,
+        allow_recent_reuse: bool = False,
+    ) -> tuple[object | None, list[PlayerProfile], int, int]:
+        """Force every registered active-season profile into persistent cache."""
+        season = await get_active_season(guild_id)
+        if season is None:
+            return None, [], 0, 0
+        players = await get_registered_players_with_links(
+            guild_id, int(season["id"])
+        )
+        if not players:
+            return season, [], 0, 0
+        profiles, refreshed, failed, _ = await self.get_leaderboard_profiles(
+            guild_id=guild_id,
+            season_id=int(season["id"]),
+            players=players,
+            force_refresh=True,
+            allow_recent_force_reuse=allow_recent_reuse,
+        )
+        # /stats player uses this shared in-memory profile cache. Populate it
+        # from the same refresh so that command does not immediately scrape
+        # the website again for the same data.
+        for profile in profiles:
+            self.bot.profile_cache.set(profile.username, profile)
+        return season, profiles, refreshed, failed
+
+    async def _refresh_all_current_seasons(self, reason: str) -> None:
+        print(f"Refreshing current-season website statistics: {reason}.")
+        for guild in self.bot.guilds:
+            try:
+                season, profiles, refreshed, failed = (
+                    await self.refresh_current_season_profiles(guild.id)
+                )
+                if season is not None:
+                    print(
+                        f"Website-stat refresh for guild {guild.id}: "
+                        f"{refreshed} refreshed, {failed} failed, "
+                        f"{len(profiles)} available."
+                    )
+            except Exception as error:
+                print(
+                    f"Website-stat refresh failed for guild {guild.id}: "
+                    f"{error!r}"
+                )
+
+    def notify_proavalon_connected(self) -> None:
+        """Start one immediate refresh after a live-socket (re)connection."""
+        now = time.monotonic()
+        if self._socket_refresh_task is not None and not self._socket_refresh_task.done():
+            return
+        # A brief socket flap should not enqueue another full roster scrape
+        # while the just-completed data is still current.
+        if now - self._last_socket_refresh_at < 5 * 60:
+            return
+        self._last_socket_refresh_at = now
+        self._socket_refresh_task = asyncio.create_task(
+            self._refresh_all_current_seasons("ProAvalon socket connected"),
+            name="proavalon-reconnect-profile-refresh",
+        )
 
     @tasks.loop(hours=6)
     async def _profile_sync_loop(self) -> None:
         """Refresh saved website totals without delaying leaderboard commands."""
-        for guild in self.bot.guilds:
-            season = await get_active_season(guild.id)
-            if season is None:
-                continue
-            players = await get_registered_players_with_links(
-                guild.id, int(season["id"])
-            )
-            if not players:
-                continue
-            try:
-                await self.get_leaderboard_profiles(
-                    guild_id=guild.id,
-                    season_id=int(season["id"]),
-                    players=players,
-                    force_refresh=True,
-                    allow_recent_force_reuse=True,
-                )
-            except Exception as error:
-                print(f"Background leaderboard profile sync failed: {error!r}")
+        await self._refresh_all_current_seasons("scheduled six-hour refresh")
 
     @_profile_sync_loop.before_loop
     async def _before_profile_sync_loop(self) -> None:
@@ -1451,6 +1546,48 @@ class LeaderboardCommands(commands.Cog):
         if statistic.value in {"crit_accuracy", "crit_errors"} and minimum_games == DEFAULT_MINIMUM_GAMES:
             effective_minimum = 15
 
+        if statistic.value == "false_merlin_shots":
+            assassination_stats = await get_season_merlin_shot_stats(
+                int(season["id"])
+            )
+            registered = {
+                str(row["proavalon_username"]).casefold()
+                for row in players
+            }
+            entries = [
+                LeaderboardEntry(
+                    username=item.username,
+                    games=item.non_merlin_games,
+                    wins=item.false_merlin_shots,
+                    losses=(
+                        item.non_merlin_games - item.false_merlin_shots
+                    ),
+                )
+                for key, item in assassination_stats.items()
+                if key in registered
+                and item.non_merlin_games >= effective_minimum
+            ]
+            entries = sort_entries(entries, statistic.value)
+            total_qualifying_before_limit = len(entries)
+            displayed_entries = (
+                entries if players_shown is None else entries[:players_shown]
+            )
+            view = LeaderboardView(
+                entries=displayed_entries,
+                season_name=season_display_name(season),
+                metric=statistic.value,
+                minimum_games=effective_minimum,
+                requested_limit=players_shown,
+                total_qualifying_before_limit=total_qualifying_before_limit,
+                refreshed_count=0,
+                failed_count=0,
+                cache_hit=True,
+                cache_age_seconds=0,
+                requesting_user_id=interaction.user.id,
+            )
+            await interaction.followup.send(embed=view.build_embed(), view=view)
+            return
+
         if statistic.value in {"crit_accuracy", "crit_errors"}:
             voting = await get_season_voting_metrics(int(season["id"]))
             entries = []
@@ -1575,12 +1712,9 @@ class LeaderboardCommands(commands.Cog):
             return
 
         await interaction.response.defer(thinking=True, ephemeral=True)
-        profiles, refreshed, failed, _ = await self.get_leaderboard_profiles(
-            guild_id=guild_id,
-            season_id=int(season["id"]),
-            players=players,
-            force_refresh=True,
-            allow_recent_force_reuse=False,
+        _, profiles, refreshed, failed = await self.refresh_current_season_profiles(
+            guild_id,
+            allow_recent_reuse=False,
         )
         await interaction.followup.send(
             (

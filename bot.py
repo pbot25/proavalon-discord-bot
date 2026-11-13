@@ -1,4 +1,5 @@
 import asyncio
+import math
 import os
 import time
 
@@ -20,6 +21,10 @@ load_dotenv()
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 PROAVALON_USERNAME = os.getenv("PROAVALON_USERNAME")
 PROAVALON_PASSWORD = os.getenv("PROAVALON_PASSWORD")
+
+GATEWAY_CHECK_SECONDS = 30
+GATEWAY_RECOVERY_SECONDS = 180
+GATEWAY_SILENCE_SECONDS = 180
 
 
 if not DISCORD_TOKEN:
@@ -53,28 +58,47 @@ class ProAvalonBot(commands.Bot):
         self.recorder_bridge = RecorderBridge(self)
         self.gateway_watchdog_task: asyncio.Task | None = None
         self.gateway_disconnected_at: float | None = None
+        self.gateway_last_receive_at: float | None = None
         self.gateway_was_ready = False
         self.restart_requested = False
         self.resources_closed = False
 
     async def gateway_watchdog(self) -> None:
-        """Recycle Pbot when Discord remains disconnected for three minutes."""
+        """Recycle Pbot when Discord disconnects or its gateway becomes stale."""
         try:
             await self.wait_until_ready()
             self.gateway_was_ready = True
+            self.gateway_last_receive_at = time.monotonic()
             while not self.is_closed():
-                await asyncio.sleep(30)
-                if self.is_ready():
+                await asyncio.sleep(GATEWAY_CHECK_SECONDS)
+                now = time.monotonic()
+                latency = self.latency
+                silent_for = (
+                    now - self.gateway_last_receive_at
+                    if self.gateway_last_receive_at is not None
+                    else 0.0
+                )
+                ready_and_alive = (
+                    self.is_ready()
+                    and math.isfinite(latency)
+                    and silent_for < GATEWAY_SILENCE_SECONDS
+                )
+                if ready_and_alive:
                     self.gateway_disconnected_at = None
                     continue
 
-                now = time.monotonic()
                 if self.gateway_disconnected_at is None:
                     self.gateway_disconnected_at = now
+                    print(
+                        "Discord gateway health check failed "
+                        f"(ready={self.is_ready()}, latency={latency!r}, "
+                        f"silent_for={int(silent_for)}s); waiting for recovery.",
+                        flush=True,
+                    )
                     continue
 
                 disconnected_for = now - self.gateway_disconnected_at
-                if disconnected_for < 180:
+                if disconnected_for < GATEWAY_RECOVERY_SECONDS:
                     continue
 
                 print(
@@ -90,6 +114,14 @@ class ProAvalonBot(commands.Bot):
         except RuntimeError:
             # wait_until_ready raises if the bot closes during startup.
             return
+        except Exception as error:
+            print(
+                f"Discord gateway watchdog failed unexpectedly: {error!r}; "
+                "recycling Pbot.",
+                flush=True,
+            )
+            self.restart_requested = True
+            await self.close()
 
     async def setup_hook(self) -> None:
         print("Initializing database...")
@@ -141,9 +173,15 @@ class ProAvalonBot(commands.Bot):
         if watchdog is not None and watchdog is not asyncio.current_task():
             watchdog.cancel()
         print("Closing recorder bridge...")
-        await self.recorder_bridge.close()
+        try:
+            await asyncio.wait_for(self.recorder_bridge.close(), timeout=15)
+        except (asyncio.TimeoutError, Exception) as error:
+            print(f"Recorder bridge cleanup did not finish cleanly: {error!r}")
         print("Closing ProAvalon scraper...")
-        await self.proavalon_scraper.close()
+        try:
+            await asyncio.wait_for(self.proavalon_scraper.close(), timeout=15)
+        except (asyncio.TimeoutError, Exception) as error:
+            print(f"ProAvalon scraper cleanup did not finish cleanly: {error!r}")
         await super().close()
 
 
@@ -154,6 +192,7 @@ def create_bot() -> ProAvalonBot:
     async def on_ready() -> None:
         bot.gateway_was_ready = True
         bot.gateway_disconnected_at = None
+        bot.gateway_last_receive_at = time.monotonic()
         print(f"Logged into Discord as {bot.user}", flush=True)
 
     @bot.event
@@ -165,7 +204,14 @@ def create_bot() -> ProAvalonBot:
     @bot.event
     async def on_resumed() -> None:
         bot.gateway_disconnected_at = None
+        bot.gateway_last_receive_at = time.monotonic()
         print("Discord gateway session resumed.", flush=True)
+
+    @bot.event
+    async def on_socket_raw_receive(message: str | bytes) -> None:
+        # Heartbeat acknowledgements pass through the raw receive hook. This
+        # detects a half-open connection even if discord.py still says ready.
+        bot.gateway_last_receive_at = time.monotonic()
 
     @bot.tree.command(
         name="ping",
@@ -183,7 +229,7 @@ def create_bot() -> ProAvalonBot:
 
 
 async def run_bot_forever() -> None:
-    """Retry a Cloudflare-blocked Discord login without a crash loop."""
+    """Keep Pbot alive across gateway, network, and login interruptions."""
     retry_delay = 10 * 60
     while True:
         bot = create_bot()
@@ -197,18 +243,40 @@ async def run_bot_forever() -> None:
             await asyncio.sleep(10)
             retry_delay = 10 * 60
             continue
+        except discord.LoginFailure:
+            # Configuration errors cannot recover through retrying.
+            raise
         except discord.HTTPException as error:
-            if getattr(error, "status", None) != 429:
-                raise
+            if getattr(error, "status", None) == 429:
+                print(
+                    "Discord login is temporarily rate-limited. "
+                    f"Keeping the service alive and retrying in "
+                    f"{retry_delay // 60} minute(s).",
+                    flush=True,
+                )
+                await asyncio.sleep(retry_delay)
+                retry_delay = min(retry_delay * 2, 60 * 60)
+                continue
 
             print(
-                "Discord login is temporarily rate-limited. "
-                f"Keeping the service alive and retrying in "
-                f"{retry_delay // 60} minute(s).",
+                f"Discord HTTP session failed: {error!r}. "
+                "Starting a fresh Pbot session in 10 seconds.",
                 flush=True,
             )
-            await asyncio.sleep(retry_delay)
-            retry_delay = min(retry_delay * 2, 60 * 60)
+            await asyncio.sleep(10)
+            retry_delay = 10 * 60
+        except discord.PrivilegedIntentsRequired:
+            raise
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            print(
+                f"Discord session ended unexpectedly: {error!r}. "
+                "Starting a fresh Pbot session in 10 seconds.",
+                flush=True,
+            )
+            await asyncio.sleep(10)
+            retry_delay = 10 * 60
 
 
 asyncio.run(run_bot_forever())

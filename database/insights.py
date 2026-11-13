@@ -352,7 +352,21 @@ def season_overview_summary(rows):
     m1_passes = 0
     m1_fails = 0
     m1_hammer = {"Resistance": 0, "Spy": 0, "Unknown": 0}
+    m1_outcomes = {
+        "Pass": [0, 0, 0],
+        "Fail": [0, 0, 0],
+    }
+    m1_hammer_outcomes = {
+        "Resistance": [0, 0, 0],
+        "Spy": [0, 0, 0],
+        "Unknown": [0, 0, 0],
+    }
     card_starts = {"Resistance": 0, "Spy": 0, "Unknown": 0}
+    card_start_outcomes = {
+        "Resistance": [0, 0, 0],
+        "Spy": [0, 0, 0],
+        "Unknown": [0, 0, 0],
+    }
     card_transitions = {
         "Resistance→Resistance": [0, 0],
         "Resistance→Spy": [0, 0],
@@ -367,12 +381,21 @@ def season_overview_summary(rows):
             return default
 
     for row in matches:
+        winner = winner_norm(row_value(row, "winner"))
         missions = _j(row_value(row, "mission_history_json"), [])
         if missions:
             if str(missions[0]).casefold() == "succeeded":
                 m1_passes += 1
+                m1_key = "Pass"
             elif str(missions[0]).casefold() == "failed":
                 m1_fails += 1
+                m1_key = "Fail"
+            else:
+                m1_key = None
+            if m1_key is not None:
+                m1_outcomes[m1_key][0] += 1
+                m1_outcomes[m1_key][1] += int(winner == "Resistance")
+                m1_outcomes[m1_key][2] += int(winner == "Spy")
 
         players = _j(row_value(row, "players_json"), [])
         roles = _j(row_value(row, "roles_json"), [])
@@ -381,16 +404,28 @@ def season_overview_summary(rows):
             for index, name in enumerate(players)
             if index < len(roles)
         }
-        votes = _j(row_value(row, "vote_history_json"), {})
-        hammer_leader = None
-        for name in players:
-            history = votes.get(name) or votes.get(str(name).casefold()) or []
-            picks = history[0] if history and isinstance(history[0], list) else []
-            if len(picks) >= 5 and "VHleader" in str(picks[4]):
-                hammer_leader = str(name)
-                break
+        hammer_leader = row_value(row, "m1_hammer_username")
+        hammer_alignment = row_value(row, "m1_hammer_alignment")
+        if not hammer_leader:
+            votes = _j(row_value(row, "vote_history_json"), {})
+            for name in players:
+                history = votes.get(name) or votes.get(str(name).casefold()) or []
+                picks = history[0] if history and isinstance(history[0], list) else []
+                if len(picks) >= 5 and "VHleader" in str(picks[4]):
+                    hammer_leader = str(name)
+                    break
         if hammer_leader is not None:
-            m1_hammer[alignments.get(hammer_leader.casefold()) or "Unknown"] += 1
+            hammer_alignment = (
+                hammer_alignment
+                or alignments.get(str(hammer_leader).casefold())
+                or "Unknown"
+            )
+            m1_hammer[hammer_alignment] += 1
+            m1_hammer_outcomes[hammer_alignment][0] += 1
+            m1_hammer_outcomes[hammer_alignment][1] += int(
+                winner == "Resistance"
+            )
+            m1_hammer_outcomes[hammer_alignment][2] += int(winner == "Spy")
 
         card_data = _j(
             row_value(row, "card_history_json"),
@@ -407,8 +442,13 @@ def season_overview_summary(rows):
             for name in ref_history
         ]
         if holder_alignments:
-            card_starts[holder_alignments[0]] += 1
-        winner = winner_norm(row_value(row, "winner"))
+            starting_alignment = holder_alignments[0]
+            card_starts[starting_alignment] += 1
+            card_start_outcomes[starting_alignment][0] += 1
+            card_start_outcomes[starting_alignment][1] += int(
+                winner == "Resistance"
+            )
+            card_start_outcomes[starting_alignment][2] += int(winner == "Spy")
         for first, second in zip(holder_alignments, holder_alignments[1:]):
             key = f"{first}→{second}"
             if key in card_transitions:
@@ -446,7 +486,10 @@ def season_overview_summary(rows):
         "m1_passes": m1_passes,
         "m1_fails": m1_fails,
         "m1_hammer": m1_hammer,
+        "m1_outcomes": m1_outcomes,
+        "m1_hammer_outcomes": m1_hammer_outcomes,
         "card_starts": card_starts,
+        "card_start_outcomes": card_start_outcomes,
         "card_transitions": card_transitions,
     }
 

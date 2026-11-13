@@ -9,6 +9,10 @@ from discord.ext import commands
 from database.account_links import get_preferred_link_for_discord
 from database.ratings import get_cached_rating, get_rating_extremes
 from database.voting_metrics import get_player_voting_metrics
+from database.assassination_stats import (
+    ROLE_BUCKETS,
+    get_player_merlin_shot_stats,
+)
 from database.social_stats import (
     MIN_SHARED_GAMES,
     build_pair_social_stats,
@@ -1305,6 +1309,91 @@ class StatsCommands(
 ):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
+
+    @app_commands.command(
+        name="merlin-shots",
+        description="Shows how often a player was selected as the Merlin target.",
+    )
+    @app_commands.describe(
+        username="Registered player. Leave blank to use your linked account.",
+        discord_user="Linked Discord @ to look up.",
+    )
+    @app_commands.autocomplete(username=registered_username_autocomplete)
+    async def merlin_shots(
+        self,
+        interaction: discord.Interaction,
+        username: str | None = None,
+        discord_user: discord.Member | None = None,
+    ) -> None:
+        if interaction.guild_id is None:
+            await interaction.response.send_message(
+                "This command can only be used in a server.", ephemeral=True
+            )
+            return
+
+        season = await get_active_season(interaction.guild_id)
+        if season is None:
+            await interaction.response.send_message(
+                "No community season is currently active.", ephemeral=True
+            )
+            return
+
+        requested, error = await resolve_stats_target(
+            interaction,
+            season,
+            username=username,
+            discord_user=discord_user,
+        )
+        if error is not None:
+            await interaction.response.send_message(error, ephemeral=True)
+            return
+
+        resolved = await resolve_registered_username(
+            season_id=int(season["id"]),
+            requested_username=requested,
+        )
+        if resolved is None:
+            await interaction.response.send_message(
+                f"`{requested}` is not registered for {season_display_name(season)}.",
+                ephemeral=True,
+            )
+            return
+
+        stats = await get_player_merlin_shot_stats(
+            int(season["id"]), resolved
+        )
+        lines = []
+        for role in ROLE_BUCKETS:
+            games = stats.games_by_role[role]
+            shots = stats.shots_by_role[role]
+            rate = shots / games * 100 if games else 0.0
+            lines.append(
+                f"**{role}:** {shots:,} shots / {games:,} games ({rate:.1f}%)"
+            )
+
+        non_merlin_rate = (
+            stats.false_merlin_shots / stats.non_merlin_games * 100
+            if stats.non_merlin_games else 0.0
+        )
+        embed = discord.Embed(
+            title=f"{resolved} — Merlin Shot Statistics",
+            description=(
+                "\n".join(lines)
+                + "\n\n"
+                + f"**False Merlin shots:** {stats.false_merlin_shots:,} / "
+                f"{stats.non_merlin_games:,} non-Merlin Resistance games "
+                f"({non_merlin_rate:.1f}%)\n"
+                + f"**All Merlin-target selections:** {stats.total_shots:,}"
+            ),
+            color=discord.Color.blurple(),
+        )
+        embed.set_footer(
+            text=(
+                f"{season_display_name(season)} • Stored from completed "
+                "matches recorded after this feature was deployed"
+            )
+        )
+        await interaction.response.send_message(embed=embed)
 
     @app_commands.command(
         name="history",

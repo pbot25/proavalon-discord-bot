@@ -39,6 +39,7 @@ from database.matches import (
     set_match_channel,
 )
 from database.insights import season_overview_summary, season_rows
+from services.advanced_stats_backfill import backfill_advanced_stats
 
 
 RANK_CHOICES = [
@@ -66,6 +67,47 @@ RANK_EMOJIS = {
 STATUS_PAGE_SIZE = 15
 
 
+def select_next_waiting_lobby(
+    lobbies: list[dict],
+    registered_usernames: set[str] | None = None,
+) -> tuple[int | None, set[str]]:
+    """Choose the most populated public non-game lobby with a known roster."""
+    candidates: list[tuple[int, int, int, set[str]]] = []
+    for lobby in lobbies:
+        status = str(lobby.get("status") or "").casefold()
+        if status in {"game in progress", "finished"}:
+            continue
+        if bool(lobby.get("password_locked", False)):
+            continue
+        players = {
+            str(username).strip().casefold()
+            for username in lobby.get("players") or []
+            if isinstance(username, str) and username.strip()
+        }
+        if not players:
+            continue
+        try:
+            room_id = int(lobby["room_id"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        registered_count = (
+            len(players.intersection(registered_usernames))
+            if registered_usernames is not None
+            else len(players)
+        )
+        if registered_usernames is not None and registered_count == 0:
+            continue
+        candidates.append((registered_count, len(players), room_id, players))
+
+    if not candidates:
+        return None, set()
+
+    _, _, room_id, players = max(
+        candidates, key=lambda item: (item[0], item[1], item[2])
+    )
+    return room_id, players
+
+
 def format_season_duration(seconds) -> str:
     if seconds is None:
         return "N/A"
@@ -75,6 +117,18 @@ def format_season_duration(seconds) -> str:
     if hours:
         return f"{hours}h {minutes}m {remaining_seconds}s"
     return f"{minutes}m {remaining_seconds}s"
+
+
+def format_outcome_split(values) -> str:
+    """Format [games, Resistance wins, Spy wins] for conditional stats."""
+    games, resistance_wins, spy_wins = (int(value) for value in values)
+    known = resistance_wins + spy_wins
+    resistance_rate = resistance_wins / known * 100 if known else 0.0
+    spy_rate = spy_wins / known * 100 if known else 0.0
+    return (
+        f"{games:,} games • Res WR {resistance_rate:.1f}% • "
+        f"Spy WR {spy_rate:.1f}%"
+    )
 
 
 def format_storage_size(size_bytes: int) -> str:
@@ -1134,7 +1188,7 @@ class SeasonCommands(
 
     @app_commands.command(
         name="next-lobby-ping",
-        description="Pings voice members who are not already in an ongoing match.",
+        description="Pings registered voice members available for the next lobby.",
     )
     @app_commands.describe(
         voice_channel=(
@@ -1204,13 +1258,6 @@ class SeasonCommands(
             )
             return
 
-        ongoing_usernames = {
-            str(username).casefold()
-            for lobby in tracker.get_recorder_lobby_snapshot()
-            if str(lobby.get("status") or "").casefold() == "game in progress"
-            for username in lobby.get("players") or []
-            if isinstance(username, str)
-        }
         linked_players = await get_registered_players_with_links(
             interaction.guild_id,
             int(season["id"]),
@@ -1220,31 +1267,44 @@ class SeasonCommands(
             for row in linked_players
             if row["discord_user_id"] is not None
         }
-
-        eligible_members = [
-            member
-            for member in target_channel.members
-            if (
-                not member.bot
-                and linked_username_by_discord_id.get(member.id)
-                not in ongoing_usernames
-            )
-        ]
-        excluded_count = sum(
-            1
-            for member in target_channel.members
-            if (
-                not member.bot
-                and linked_username_by_discord_id.get(member.id)
-                in ongoing_usernames
-            )
+        lobby_snapshot = await tracker.get_fresh_recorder_lobby_snapshot()
+        ongoing_usernames = {
+            str(username).casefold()
+            for lobby in lobby_snapshot
+            if str(lobby.get("status") or "").casefold() == "game in progress"
+            for username in lobby.get("players") or []
+            if isinstance(username, str)
+        }
+        waiting_room_id, waiting_usernames = select_next_waiting_lobby(
+            lobby_snapshot,
+            set(linked_username_by_discord_id.values()),
         )
+
+        eligible_members: list[discord.Member] = []
+        unregistered_count = 0
+        playing_count = 0
+        waiting_count = 0
+        for member in target_channel.members:
+            if member.bot:
+                continue
+            username = linked_username_by_discord_id.get(member.id)
+            if username is None:
+                unregistered_count += 1
+                continue
+            if username in ongoing_usernames:
+                playing_count += 1
+                continue
+            if waiting_room_id is not None and username in waiting_usernames:
+                waiting_count += 1
+                continue
+            eligible_members.append(member)
 
         if not eligible_members:
             await interaction.response.send_message(
                 (
                     f"Nobody in {target_channel.mention} is available to ping. "
-                    f"{excluded_count} member(s) are already in an ongoing match."
+                    f"Excluded {playing_count} playing, {waiting_count} already "
+                    f"in the waiting lobby, and {unregistered_count} unregistered."
                 ),
                 ephemeral=True,
                 allowed_mentions=discord.AllowedMentions.none(),
@@ -1280,7 +1340,13 @@ class SeasonCommands(
         summary = (
             f"{lobby_message}\n\n{mention_chunks[0]}\n\n"
             f"*Checked {target_channel.mention}: {len(eligible_members)} available, "
-            f"{excluded_count} already playing.*"
+            f"{playing_count} playing, {waiting_count} already in "
+            + (
+                f"waiting room {waiting_room_id}, "
+                if waiting_room_id is not None
+                else "a waiting lobby (none detected), "
+            )
+            + f"{unregistered_count} unregistered.*"
         )
         await interaction.response.send_message(
             summary,
@@ -1390,6 +1456,51 @@ class SeasonCommands(
         )
 
     @app_commands.command(
+        name="refresh-stats",
+        description="Refreshes every registered player's current website statistics.",
+    )
+    @bot_admin_only()
+    async def refresh_stats(self, interaction: discord.Interaction) -> None:
+        if interaction.guild_id is None:
+            await interaction.response.send_message(
+                "This command can only be used in a server.", ephemeral=True
+            )
+            return
+
+        leaderboard_cog = self.bot.get_cog("LeaderboardCommands")
+        refresh = getattr(leaderboard_cog, "refresh_current_season_profiles", None)
+        if refresh is None:
+            await interaction.response.send_message(
+                "The website-stat synchronization service is not ready.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer(thinking=True, ephemeral=True)
+        season, profiles, refreshed, failed = await refresh(
+            interaction.guild_id,
+            allow_recent_reuse=False,
+        )
+        if season is None:
+            await interaction.followup.send(
+                "No community season is currently active.", ephemeral=True
+            )
+            return
+
+        await interaction.followup.send(
+            (
+                f"Refreshed website statistics for "
+                f"**{season_display_name(season)}**.\n"
+                f"Successfully refreshed: **{refreshed:,}**\n"
+                f"Failed website requests: **{failed:,}**\n"
+                f"Profiles now available: **{len(profiles):,}**\n\n"
+                "Games played, win rates, role records, alignment records, "
+                "rank, and total play time now use the refreshed profiles."
+            ),
+            ephemeral=True,
+        )
+
+    @app_commands.command(
         name="info",
         description="Shows current-season configuration and overall statistics.",
     )
@@ -1494,7 +1605,6 @@ class SeasonCommands(
             name="Game Lengths",
             value=(
                 f"**Average:** {format_season_duration(summary['average_duration_seconds'])}\n"
-                f"**Median:** {format_season_duration(summary['median_duration_seconds'])}\n"
                 f"**Shortest:** "
                 f"{format_season_duration(summary['shortest_duration_seconds'])}"
                 f"{shortest_match}\n"
@@ -1502,31 +1612,53 @@ class SeasonCommands(
                 f"{format_season_duration(summary['longest_duration_seconds'])}"
                 f"{longest_match}\n"
                 f"**Total play time:** "
-                f"{format_season_duration(summary['total_duration_seconds'])}\n"
-                f"Duration coverage: **{summary['timed_matches']:,}/"
-                f"{summary['matches']:,} matches**"
+                f"{format_season_duration(summary['total_duration_seconds'])}"
             ),
             inline=False,
         )
 
+        await interaction.response.send_message(embed=embed)
+
+    @app_commands.command(
+        name="stats",
+        description="Shows detailed current-season outcome and card statistics.",
+    )
+    async def stats(self, interaction: discord.Interaction) -> None:
+        if interaction.guild_id is None:
+            await interaction.response.send_message(
+                "This command can only be used in a server.", ephemeral=True
+            )
+            return
+        season = await get_active_season(interaction.guild_id)
+        if season is None:
+            await interaction.response.send_message(
+                "No community season is currently active.", ephemeral=True
+            )
+            return
+
+        summary = season_overview_summary(
+            await season_rows(int(season["id"]))
+        )
+        embed = discord.Embed(
+            title=f"{season_display_name(season)} — Detailed Statistics",
+            description=f"Based on **{summary['matches']:,}** archived matches.",
+            color=discord.Color.blurple(),
+        )
+
         youtube_rate = (
             summary["youtube_matches"] / summary["matches"] * 100
-            if summary["matches"]
-            else 0.0
+            if summary["matches"] else 0.0
         )
         average_missions = (
             f"{summary['average_missions']:.2f}"
-            if summary["average_missions"] is not None
-            else "N/A"
-        )
-        assassination_time = format_season_duration(
-            summary["average_assassination_seconds"]
+            if summary["average_missions"] is not None else "N/A"
         )
         embed.add_field(
             name="Additional Season Data",
             value=(
                 f"**Average missions:** {average_missions}\n"
-                f"**Average assassination phase:** {assassination_time}\n"
+                f"**Average assassination phase:** "
+                f"{format_season_duration(summary['average_assassination_seconds'])}\n"
                 f"**YouTube recordings:** {summary['youtube_matches']:,}/"
                 f"{summary['matches']:,} ({youtube_rate:.1f}%)"
             ),
@@ -1535,38 +1667,172 @@ class SeasonCommands(
 
         m1_total = summary["m1_passes"] + summary["m1_fails"]
         embed.add_field(
-            name="Mission 1",
+            name="Mission 1 Outcomes",
             value=(
                 f"**Passes:** {summary['m1_passes']:,} "
                 f"({summary['m1_passes'] / m1_total * 100 if m1_total else 0:.1f}%)\n"
+                f"↳ {format_outcome_split(summary['m1_outcomes']['Pass'])}\n"
                 f"**Fails:** {summary['m1_fails']:,} "
                 f"({summary['m1_fails'] / m1_total * 100 if m1_total else 0:.1f}%)\n"
-                f"**Hammer leader:** Resistance {summary['m1_hammer']['Resistance']:,} • "
-                f"Spy {summary['m1_hammer']['Spy']:,} • "
-                f"Unknown {summary['m1_hammer']['Unknown']:,}"
+                f"↳ {format_outcome_split(summary['m1_outcomes']['Fail'])}"
             ),
             inline=False,
         )
 
-        starts = summary["card_starts"]
-        transition_lines = []
-        for label, (games, spy_wins) in summary["card_transitions"].items():
-            transition_lines.append(
-                f"**{label}:** {games:,} • Spy WR "
-                f"{spy_wins / games * 100 if games else 0:.1f}%"
+        hammer_lines = [
+            f"**Resistance hammer:** "
+            f"{format_outcome_split(summary['m1_hammer_outcomes']['Resistance'])}",
+            f"**Spy hammer:** "
+            f"{format_outcome_split(summary['m1_hammer_outcomes']['Spy'])}",
+        ]
+        if summary["m1_hammer"]["Unknown"]:
+            hammer_lines.append(
+                f"**Unknown hammer:** "
+                f"{format_outcome_split(summary['m1_hammer_outcomes']['Unknown'])}"
             )
         embed.add_field(
-            name="Ref of the Rain Card",
+            name="Mission 1 Hammer",
+            value="\n".join(hammer_lines),
+            inline=False,
+        )
+
+        start_lines = [
+            f"**Starts with Resistance:** "
+            f"{format_outcome_split(summary['card_start_outcomes']['Resistance'])}",
+            f"**Starts with Spy:** "
+            f"{format_outcome_split(summary['card_start_outcomes']['Spy'])}",
+        ]
+        if summary["card_starts"]["Unknown"]:
+            start_lines.append(
+                f"**Unknown starting holder:** "
+                f"{format_outcome_split(summary['card_start_outcomes']['Unknown'])}"
+            )
+        embed.add_field(
+            name="Ref of the Rain — Starting Holder",
+            value="\n".join(start_lines),
+            inline=False,
+        )
+
+        transition_lines = []
+        for label, (games, spy_wins) in summary["card_transitions"].items():
+            resistance_wins = games - spy_wins
+            transition_lines.append(
+                f"**{label}:** "
+                f"{format_outcome_split([games, resistance_wins, spy_wins])}"
+            )
+        embed.add_field(
+            name="Ref of the Rain — Transfers",
             value=(
-                f"**Starting holder:** Resistance {starts['Resistance']:,} • "
-                f"Spy {starts['Spy']:,} • Unknown {starts['Unknown']:,}\n"
-                + "\n".join(transition_lines)
-                + "\n*Card history coverage begins with matches recorded after this update.*"
+                "\n".join(transition_lines)
+                + "\n*Card-history coverage begins with matches recorded after "
+                "card persistence was added.*"
             ),
             inline=False,
         )
 
         await interaction.response.send_message(embed=embed)
+
+    @app_commands.command(
+        name="backfill-advanced-stats",
+        description="Recovers old Shot, Ref, and M1 hammer data from match posts.",
+    )
+    @app_commands.describe(
+        channel=(
+            "Match-history channel to scan. Defaults to the configured channel."
+        )
+    )
+    @bot_admin_only()
+    async def backfill_advanced_stats_command(
+        self,
+        interaction: discord.Interaction,
+        channel: discord.TextChannel | None = None,
+    ) -> None:
+        if interaction.guild_id is None:
+            await interaction.response.send_message(
+                "This command can only be used in a server.", ephemeral=True
+            )
+            return
+
+        target_channel = channel
+        if target_channel is None:
+            config = await get_match_config(interaction.guild_id)
+            if config is None or not config["channel_id"]:
+                await interaction.response.send_message(
+                    "No match-history channel is configured. Select one explicitly.",
+                    ephemeral=True,
+                )
+                return
+            resolved = self.bot.get_channel(int(config["channel_id"]))
+            if resolved is None:
+                try:
+                    resolved = await self.bot.fetch_channel(
+                        int(config["channel_id"])
+                    )
+                except discord.DiscordException:
+                    resolved = None
+            if not isinstance(resolved, discord.TextChannel):
+                await interaction.response.send_message(
+                    "The configured match-history channel is unavailable.",
+                    ephemeral=True,
+                )
+                return
+            target_channel = resolved
+
+        await interaction.response.defer(thinking=True, ephemeral=True)
+        try:
+            result = await backfill_advanced_stats(
+                interaction.guild_id,
+                target_channel,
+            )
+        except discord.Forbidden:
+            await interaction.followup.send(
+                "I cannot read the complete message history in that channel.",
+                ephemeral=True,
+            )
+            return
+        except discord.HTTPException as error:
+            await interaction.followup.send(
+                f"Discord interrupted the archive scan: `{error}`",
+                ephemeral=True,
+            )
+            return
+
+        embed = discord.Embed(
+            title="Advanced Statistics Backfill Complete",
+            description=(
+                f"Scanned {target_channel.mention} from its oldest available "
+                "message through today."
+            ),
+            color=discord.Color.green(),
+        )
+        embed.add_field(
+            name="Archive Coverage",
+            value=(
+                f"**Database matches:** {result.database_matches:,}\n"
+                f"**Messages scanned:** {result.messages_scanned:,}\n"
+                f"**Match posts identified:** {result.matches_found:,}\n"
+                f"**Unmatched historical posts:** {result.unmatched_messages:,}"
+            ),
+            inline=False,
+        )
+        embed.add_field(
+            name="Recovered",
+            value=(
+                f"**Shot targets:** {result.shots_recovered:,}\n"
+                f"**Ref histories:** {result.ref_histories_recovered:,}\n"
+                f"**M1 hammers:** {result.hammers_recovered:,}\n"
+                f"**Already stored/no recoverable field:** "
+                f"{result.already_complete:,}"
+            ),
+            inline=False,
+        )
+        embed.set_footer(
+            text=(
+                "Safe to run again: existing values are preserved and only "
+                "missing historical fields are filled."
+            )
+        )
+        await interaction.followup.send(embed=embed, ephemeral=True)
 
     @app_commands.command(
         name="registered-players",

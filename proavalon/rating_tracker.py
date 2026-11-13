@@ -43,6 +43,8 @@ class ProAvalonRatingTracker:
         self._task = None
         self._stop_event = asyncio.Event()
         self._websocket = None
+        self.connected = False
+        self._reconnect_delay = 0
         self._games = {}
         self._room_rosters = {}
         self._tracked = {}  # room -> state
@@ -92,19 +94,23 @@ class ProAvalonRatingTracker:
     async def _run_forever(self) -> None:
         cached = await load_rating_cache()
         print(f"Loaded {cached} persisted ProAvalon ratings.")
-        delay = 5
         while not self._stop_event.is_set():
             try:
                 await self._listen_once()
-                delay = 5
             except asyncio.CancelledError:
                 raise
             except Exception as error:
                 print(f"ProAvalon live socket disconnected: {type(error).__name__}: {error}")
             if self._stop_event.is_set():
                 break
-            await asyncio.sleep(delay)
-            delay = min(delay * 2, 60)
+            delay = self._reconnect_delay
+            if delay:
+                print(f"Reconnecting to ProAvalon in {delay} second(s).")
+                await asyncio.sleep(delay)
+            self._reconnect_delay = (
+                1 if self._reconnect_delay == 0
+                else min(self._reconnect_delay * 2, 60)
+            )
 
     async def _emit(self, event, *args):
         if self._websocket is None:
@@ -362,7 +368,12 @@ class ProAvalonRatingTracker:
             jar.update_cookies({cookie.key: cookie.value})
         timeout = aiohttp.ClientTimeout(total=None, connect=20, sock_connect=20, sock_read=None)
         async with aiohttp.ClientSession(timeout=timeout, cookie_jar=jar, headers={"User-Agent":"Mozilla/5.0 ProAvalon-Community-Stats-Bot","Origin":"https://proavalon.com"}) as session:
-            async with session.ws_connect(self.SOCKET_URL, heartbeat=None, autoping=True) as ws:
+            async with session.ws_connect(
+                self.SOCKET_URL,
+                heartbeat=None,
+                autoping=True,
+                receive_timeout=75,
+            ) as ws:
                 self._websocket = ws
                 rotator = None
                 connected = False
@@ -380,6 +391,8 @@ class ProAvalonRatingTracker:
                         if data.startswith("40"):
                             if not connected:
                                 connected = True
+                                self.connected = True
+                                self._reconnect_delay = 0
                                 # A previous socket may have disconnected after
                                 # join-room but before final game-data arrived.
                                 # Every unfinished tracked room must be eligible
@@ -390,6 +403,13 @@ class ProAvalonRatingTracker:
                                     if room_id not in self._finalizing
                                 )
                                 print("ProAvalon live rating/match socket connected.")
+                                if self.bot is not None:
+                                    cog = self.bot.get_cog("LeaderboardCommands")
+                                    notify = getattr(
+                                        cog, "notify_proavalon_connected", None
+                                    )
+                                    if notify is not None:
+                                        notify()
                                 rotator = asyncio.create_task(self._room_rotator())
                             continue
                         if not data.startswith("42"):
@@ -425,6 +445,7 @@ class ProAvalonRatingTracker:
                     if rotator:
                         rotator.cancel()
                     self._websocket = None
+                    self.connected = False
                     self._current_room = None
         raise ConnectionError("ProAvalon closed the live socket.")
 
@@ -448,6 +469,45 @@ class ProAvalonRatingTracker:
                 ),
             })
         return snapshot
+
+    async def get_fresh_recorder_lobby_snapshot(self) -> list[dict]:
+        """Refresh public waiting-room rosters for an on-demand command."""
+        if self._websocket is None:
+            return self.get_recorder_lobby_snapshot()
+
+        loop = asyncio.get_running_loop()
+        waiting_rooms: list[int] = []
+        for room_id, game in self._games.items():
+            status = str(game.get("status") or "").casefold()
+            try:
+                player_count = int(game.get("numOfPlayersInside", 0))
+            except (TypeError, ValueError):
+                player_count = 0
+            if (
+                status not in {"game in progress", "finished"}
+                and player_count > 0
+                and not game.get("passwordLocked", False)
+            ):
+                waiting_rooms.append(int(room_id))
+
+        for room_id in sorted(waiting_rooms):
+            async with self._room_action_lock:
+                future = loop.create_future()
+                self._roster_waiters[room_id] = future
+                self._current_room = room_id
+                try:
+                    await self._emit("join-room", room_id)
+                    try:
+                        roster = await asyncio.wait_for(future, timeout=2.5)
+                        self._room_rosters[room_id] = list(roster)
+                    except asyncio.TimeoutError:
+                        pass
+                finally:
+                    await self._emit("leave-room", "")
+                    self._roster_waiters.pop(room_id, None)
+                    self._current_room = None
+
+        return self.get_recorder_lobby_snapshot()
 
     async def _consider_roster(self, room_id, names):
         if len(names) != 10:
@@ -587,6 +647,51 @@ class ProAvalonRatingTracker:
             canonical = json.dumps({"room":room_id,"players":[x.casefold() for x in real_players],"winner":data.get("winner"),"missions":data.get("missionHistory"),"votes":data.get("voteHistory")}, sort_keys=True, separators=(",",":"))
             fingerprint = hashlib.sha256(canonical.encode()).hexdigest()
             public_cards = ((data.get("publicData") or {}).get("cards") or {})
+            public_roles = ((data.get("publicData") or {}).get("roles") or {})
+            assassin_shots = []
+            if isinstance(public_roles, dict):
+                assassin_shots = [
+                    name
+                    for name in (
+                        public_roles.get("assassinShotUsername"),
+                        public_roles.get("assassinShotUsername2"),
+                    )
+                    if isinstance(name, str) and name.strip()
+                ]
+            roles_by_name = {
+                str(name).casefold(): (
+                    str(roles[index]) if index < len(roles) else ""
+                )
+                for index, name in enumerate(real_players)
+            }
+            m1_hammer_username = None
+            votes = data.get("voteHistory") or {}
+            if isinstance(votes, dict):
+                for name in real_players:
+                    history = votes.get(name) or votes.get(str(name).casefold()) or []
+                    first_mission = (
+                        history[0]
+                        if history and isinstance(history[0], list)
+                        else []
+                    )
+                    if len(first_mission) >= 5 and "VHleader" in str(first_mission[4]):
+                        m1_hammer_username = str(name)
+                        break
+            hammer_role = roles_by_name.get(
+                str(m1_hammer_username or "").casefold(), ""
+            ).replace(" ", "").casefold()
+            if hammer_role in {
+                "resistance", "tristan", "isolde", "percival", "merlin",
+                "melron", "moregano",
+            }:
+                m1_hammer_alignment = "Resistance"
+            elif hammer_role in {
+                "spy", "assassin", "morgana", "mordred", "oberon",
+                "hitberon", "mordredassassin",
+            }:
+                m1_hammer_alignment = "Spy"
+            else:
+                m1_hammer_alignment = None
             card_history = {}
             if isinstance(public_cards, dict):
                 for card_key, card_data in public_cards.items():
@@ -610,6 +715,9 @@ class ProAvalonRatingTracker:
                     vote_history=data.get("voteHistory"),
                     players=real_players,
                     roles=roles,
+                    assassin_shots=assassin_shots,
+                    m1_hammer_username=m1_hammer_username,
+                    m1_hammer_alignment=m1_hammer_alignment,
                     rating_changes=changes,
                     card_history=card_history,
                     game_duration_seconds=game_duration_seconds,

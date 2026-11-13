@@ -489,6 +489,18 @@ async def _migrate_match_durations(
             "ALTER TABLE season_matches "
             "ADD COLUMN assassination_duration_seconds REAL"
         )
+    if "assassin_shots_json" not in columns:
+        await database.execute(
+            "ALTER TABLE season_matches ADD COLUMN assassin_shots_json TEXT"
+        )
+    if "m1_hammer_username" not in columns:
+        await database.execute(
+            "ALTER TABLE season_matches ADD COLUMN m1_hammer_username TEXT"
+        )
+    if "m1_hammer_alignment" not in columns:
+        await database.execute(
+            "ALTER TABLE season_matches ADD COLUMN m1_hammer_alignment TEXT"
+        )
 
     recording_columns = {
         "posted_channel_id": "TEXT",
