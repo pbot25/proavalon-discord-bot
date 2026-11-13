@@ -386,6 +386,7 @@ def season_overview_summary(rows):
         "Spy→Spy": [0, 0, 0],
     }
     card_exact_handoff_outcomes = {
+        "Zero": [0, 0, 0],
         "One": [0, 0, 0],
         "Two": [0, 0, 0],
     }
@@ -473,6 +474,11 @@ def season_overview_summary(rows):
                 winner == "Resistance"
             )
             card_unused_outcomes[unused_alignment][2] += int(winner == "Spy")
+            card_exact_handoff_outcomes["Zero"][0] += 1
+            card_exact_handoff_outcomes["Zero"][1] += int(
+                winner == "Resistance"
+            )
+            card_exact_handoff_outcomes["Zero"][2] += int(winner == "Spy")
         if len(holder_alignments) >= 2:
             key = f"{holder_alignments[0]}→{holder_alignments[1]}"
             if key in card_transitions:

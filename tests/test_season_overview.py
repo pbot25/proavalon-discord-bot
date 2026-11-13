@@ -192,6 +192,9 @@ class SeasonOverviewTests(unittest.TestCase):
             [1, 0, 1],
         )
         self.assertEqual(
+            summary["card_exact_handoff_outcomes"]["Zero"], [1, 1, 0]
+        )
+        self.assertEqual(
             summary["card_exact_handoff_outcomes"]["One"], [1, 0, 1]
         )
         self.assertEqual(

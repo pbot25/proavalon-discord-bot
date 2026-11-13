@@ -1107,6 +1107,8 @@ class PastSeason(commands.GroupCog, group_name="past-season", group_description=
         embed.add_field(
             name="Ref of the Rain — Handoff Count Summary",
             value=(
+                f"**Exactly zero handoffs:** "
+                f"{format_outcome_split(summary['card_exact_handoff_outcomes']['Zero'])}\n"
                 f"**Exactly one handoff:** "
                 f"{format_outcome_split(summary['card_exact_handoff_outcomes']['One'])}\n"
                 f"**Exactly two handoffs:** "
