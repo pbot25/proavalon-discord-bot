@@ -133,6 +133,51 @@ class SeasonOverviewTests(unittest.TestCase):
         self.assertEqual(
             summary["card_three_chains"]["Spy→Resistance→Spy"], [1, 1]
         )
+        self.assertEqual(
+            summary["card_first_handoff_stops"]["Spy→Resistance"],
+            [0, 0, 0],
+        )
+
+    def test_ref_terminal_states(self) -> None:
+        common = {
+            "game_duration_seconds": 600,
+            "assassination_duration_seconds": None,
+            "mission_history_json": '["succeeded"]',
+            "youtube_url": None,
+            "players_json": '["ResA", "SpyA"]',
+            "roles_json": '["Resistance", "Assassin"]',
+            "vote_history_json": None,
+            "m1_hammer_username": None,
+            "m1_hammer_alignment": None,
+        }
+        rows = [
+            {
+                **common,
+                "season_match_id": 4,
+                "winner": "Resistance",
+                "card_history_json": '{"Ref of the Rain":["ResA"]}',
+            },
+            {
+                **common,
+                "season_match_id": 5,
+                "winner": "Spy",
+                "card_history_json": (
+                    '{"Ref of the Rain":["ResA", "SpyA"]}'
+                ),
+            },
+        ]
+        summary = season_overview_summary(rows)
+        self.assertEqual(
+            summary["card_unused_outcomes"]["Resistance"], [1, 1, 0]
+        )
+        self.assertEqual(
+            summary["card_first_handoff_stops"]["Resistance→Spy"],
+            [1, 0, 1],
+        )
+        self.assertEqual(
+            sum(item[0] for item in summary["card_three_chains"].values()),
+            0,
+        )
 
 
 if __name__ == "__main__":

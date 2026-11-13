@@ -368,11 +368,22 @@ def season_overview_summary(rows):
         "Spy": [0, 0, 0],
         "Unknown": [0, 0, 0],
     }
+    card_unused_outcomes = {
+        "Resistance": [0, 0, 0],
+        "Spy": [0, 0, 0],
+        "Unknown": [0, 0, 0],
+    }
     card_transitions = {
         "Resistance→Resistance": [0, 0],
         "Resistance→Spy": [0, 0],
         "Spy→Resistance": [0, 0],
         "Spy→Spy": [0, 0],
+    }
+    card_first_handoff_stops = {
+        "Resistance→Resistance": [0, 0, 0],
+        "Resistance→Spy": [0, 0, 0],
+        "Spy→Resistance": [0, 0, 0],
+        "Spy→Spy": [0, 0, 0],
     }
     card_three_chains = {
         f"{first}→{second}→{third}": [0, 0]
@@ -451,11 +462,24 @@ def season_overview_summary(rows):
                 winner == "Resistance"
             )
             card_start_outcomes[starting_alignment][2] += int(winner == "Spy")
+        if len(holder_alignments) == 1:
+            unused_alignment = holder_alignments[0]
+            card_unused_outcomes[unused_alignment][0] += 1
+            card_unused_outcomes[unused_alignment][1] += int(
+                winner == "Resistance"
+            )
+            card_unused_outcomes[unused_alignment][2] += int(winner == "Spy")
         if len(holder_alignments) >= 2:
             key = f"{holder_alignments[0]}→{holder_alignments[1]}"
             if key in card_transitions:
                 card_transitions[key][0] += 1
                 card_transitions[key][1] += int(winner == "Spy")
+            if len(holder_alignments) == 2 and key in card_first_handoff_stops:
+                card_first_handoff_stops[key][0] += 1
+                card_first_handoff_stops[key][1] += int(
+                    winner == "Resistance"
+                )
+                card_first_handoff_stops[key][2] += int(winner == "Spy")
         if len(holder_alignments) >= 3:
             chain_key = "→".join(holder_alignments[:3])
             if chain_key in card_three_chains:
@@ -497,7 +521,9 @@ def season_overview_summary(rows):
         "m1_hammer_outcomes": m1_hammer_outcomes,
         "card_starts": card_starts,
         "card_start_outcomes": card_start_outcomes,
+        "card_unused_outcomes": card_unused_outcomes,
         "card_transitions": card_transitions,
+        "card_first_handoff_stops": card_first_handoff_stops,
         "card_three_chains": card_three_chains,
     }
 

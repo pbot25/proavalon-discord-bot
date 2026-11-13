@@ -1063,6 +1063,22 @@ class PastSeason(commands.GroupCog, group_name="past-season", group_description=
             value="\n".join(start_lines),
             inline=False,
         )
+        unused_lines = [
+            f"**Resistance held, never used:** "
+            f"{format_outcome_split(summary['card_unused_outcomes']['Resistance'])}",
+            f"**Spy held, never used:** "
+            f"{format_outcome_split(summary['card_unused_outcomes']['Spy'])}",
+        ]
+        if summary["card_unused_outcomes"]["Unknown"][0]:
+            unused_lines.append(
+                f"**Unknown holder, never used:** "
+                f"{format_outcome_split(summary['card_unused_outcomes']['Unknown'])}"
+            )
+        embed.add_field(
+            name="Ref of the Rain — Never Used",
+            value="\n".join(unused_lines),
+            inline=False,
+        )
         transition_lines = []
         for label, (games, spy_wins) in summary["card_transitions"].items():
             transition_lines.append(
@@ -1079,6 +1095,15 @@ class PastSeason(commands.GroupCog, group_name="past-season", group_description=
             ),
             inline=False,
         )
+        stopped_lines = [
+            f"**{label}:** {format_outcome_split(values)}"
+            for label, values in summary["card_first_handoff_stops"].items()
+        ]
+        embed.add_field(
+            name="Ref of the Rain — Handoff Then Stopped",
+            value="\n".join(stopped_lines),
+            inline=False,
+        )
         chain_lines = []
         for label, (games, spy_wins) in summary["card_three_chains"].items():
             if not games:
@@ -1090,8 +1115,13 @@ class PastSeason(commands.GroupCog, group_name="past-season", group_description=
         embed.add_field(
             name="Ref of the Rain — First Three Holders",
             value=(
-                "\n".join(chain_lines) if chain_lines
-                else "No matches recorded a third holder."
+                (
+                    "\n".join(chain_lines) if chain_lines
+                    else "No matches recorded a third holder."
+                )
+                + f"\n**Three-holder coverage:** "
+                f"{sum(item[0] for item in summary['card_three_chains'].values()):,}/"
+                f"{summary['matches']:,} matches"
             ),
             inline=False,
         )
