@@ -385,6 +385,10 @@ def season_overview_summary(rows):
         "Spy→Resistance": [0, 0, 0],
         "Spy→Spy": [0, 0, 0],
     }
+    card_exact_handoff_outcomes = {
+        "One": [0, 0, 0],
+        "Two": [0, 0, 0],
+    }
     card_three_chains = {
         f"{first}→{second}→{third}": [0, 0]
         for first in ("Resistance", "Spy")
@@ -480,6 +484,18 @@ def season_overview_summary(rows):
                     winner == "Resistance"
                 )
                 card_first_handoff_stops[key][2] += int(winner == "Spy")
+        if len(holder_alignments) == 2:
+            card_exact_handoff_outcomes["One"][0] += 1
+            card_exact_handoff_outcomes["One"][1] += int(
+                winner == "Resistance"
+            )
+            card_exact_handoff_outcomes["One"][2] += int(winner == "Spy")
+        elif len(holder_alignments) == 3:
+            card_exact_handoff_outcomes["Two"][0] += 1
+            card_exact_handoff_outcomes["Two"][1] += int(
+                winner == "Resistance"
+            )
+            card_exact_handoff_outcomes["Two"][2] += int(winner == "Spy")
         if len(holder_alignments) >= 3:
             chain_key = "→".join(holder_alignments[:3])
             if chain_key in card_three_chains:
@@ -524,6 +540,7 @@ def season_overview_summary(rows):
         "card_unused_outcomes": card_unused_outcomes,
         "card_transitions": card_transitions,
         "card_first_handoff_stops": card_first_handoff_stops,
+        "card_exact_handoff_outcomes": card_exact_handoff_outcomes,
         "card_three_chains": card_three_chains,
     }
 

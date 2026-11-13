@@ -165,6 +165,23 @@ class SeasonOverviewTests(unittest.TestCase):
                     '{"Ref of the Rain":["ResA", "SpyA"]}'
                 ),
             },
+            {
+                **common,
+                "season_match_id": 6,
+                "winner": "Resistance",
+                "card_history_json": (
+                    '{"Ref of the Rain":["SpyA", "ResA", "SpyA"]}'
+                ),
+            },
+            {
+                **common,
+                "season_match_id": 7,
+                "winner": "Spy",
+                "card_history_json": (
+                    '{"Ref of the Rain":['
+                    '"ResA", "SpyA", "ResA", "SpyA"]}'
+                ),
+            },
         ]
         summary = season_overview_summary(rows)
         self.assertEqual(
@@ -175,8 +192,14 @@ class SeasonOverviewTests(unittest.TestCase):
             [1, 0, 1],
         )
         self.assertEqual(
+            summary["card_exact_handoff_outcomes"]["One"], [1, 0, 1]
+        )
+        self.assertEqual(
+            summary["card_exact_handoff_outcomes"]["Two"], [1, 1, 0]
+        )
+        self.assertEqual(
             sum(item[0] for item in summary["card_three_chains"].values()),
-            0,
+            2,
         )
 
 
