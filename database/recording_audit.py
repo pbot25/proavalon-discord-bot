@@ -59,3 +59,44 @@ async def get_recording_audit(
         return list(reversed(rows))
     finally:
         await database.close()
+
+
+async def get_room_recording_start_times(
+    guild_ids: list[int],
+    room_id: int,
+    *,
+    since: str,
+) -> list[str]:
+    """Return persisted start observations for one recent room lifecycle."""
+    guild_texts = [str(guild_id) for guild_id in guild_ids]
+    if not guild_texts:
+        return []
+    placeholders = ",".join("?" for _ in guild_texts)
+    database = await connect()
+    try:
+        cursor = await database.execute(
+            f"""
+            SELECT stage, detail, created_at
+            FROM recording_audit_events
+            WHERE guild_id IN ({placeholders})
+              AND room_id = ?
+              AND created_at >= ?
+              AND stage IN ('match_tracking_started', 'game_recording_started')
+            ORDER BY created_at ASC, id ASC
+            """,
+            (*guild_texts, room_id, since),
+        )
+        rows = await cursor.fetchall()
+        starts: list[str] = []
+        for row in rows:
+            # Pbot persists its original socket observation in detail. Craig's
+            # game_recording_started event already has the correct created_at.
+            value = (
+                row["detail"]
+                if row["stage"] == "match_tracking_started" and row["detail"]
+                else row["created_at"]
+            )
+            starts.append(str(value))
+        return starts
+    finally:
+        await database.close()

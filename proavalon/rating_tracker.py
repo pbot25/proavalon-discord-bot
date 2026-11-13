@@ -1,7 +1,7 @@
 import asyncio
 import hashlib
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from io import BytesIO
 
 import aiohttp
@@ -16,7 +16,10 @@ from database.matches import (
     set_recording_status_by_season_match,
 )
 from database.recording_integrations import get_recording_integration
-from database.recording_audit import append_recording_audit
+from database.recording_audit import (
+    append_recording_audit,
+    get_room_recording_start_times,
+)
 from database.ratings import (
     get_cached_rating,
     load_rating_cache,
@@ -523,13 +526,13 @@ class ProAvalonRatingTracker:
         if not matched:
             return
         detected_now = datetime.now(timezone.utc)
+        is_new_tracking = room_id not in self._tracked
+        observed_start = self._game_started_at.get(room_id, detected_now)
         state = self._tracked.setdefault(
             room_id,
             {
                 "detected_at": detected_now.isoformat(),
-                "game_started_at": (
-                    self._game_started_at.get(room_id, detected_now).isoformat()
-                ),
+                "game_started_at": observed_start.isoformat(),
                 "seasons": {},
                 "pre": {},
                 "last_data": None,
@@ -542,6 +545,13 @@ class ProAvalonRatingTracker:
         for season in matched:
             sid = int(season["id"])
             state["seasons"][sid] = dict(season)
+            if is_new_tracking:
+                await append_recording_audit(
+                    int(season["guild_id"]),
+                    room_id,
+                    "match_tracking_started",
+                    detail=state["game_started_at"],
+                )
             for name in names:
                 await register_season_player(sid, name)  # void list is respected here
         print(f"Tracking qualifying season match in ProAvalon room {room_id}: {', '.join(names)}")
@@ -680,11 +690,45 @@ class ProAvalonRatingTracker:
             # Use the first public lobby timestamps we observed for start/end.
             # This is normally within one game-list update of ProAvalon's own
             # server timestamps.
-            started_at = self._game_started_at.get(room_id)
             finished_at = self._game_finished_at.get(
                 room_id,
                 datetime.now(timezone.utc),
             )
+            start_candidates: list[datetime] = []
+            for value in (
+                self._game_started_at.get(room_id),
+                state.get("game_started_at"),
+            ):
+                try:
+                    parsed = (
+                        value
+                        if isinstance(value, datetime)
+                        else datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+                    )
+                    if parsed.tzinfo is None:
+                        parsed = parsed.replace(tzinfo=timezone.utc)
+                    start_candidates.append(parsed.astimezone(timezone.utc))
+                except (TypeError, ValueError):
+                    pass
+
+            # Recover the original start after a process/socket reconnect from
+            # Pbot's persisted observation or Craig's recording-start audit.
+            persisted_starts = await get_room_recording_start_times(
+                [int(season["guild_id"]) for season in state["seasons"].values()],
+                room_id,
+                since=(finished_at - timedelta(hours=8)).isoformat(),
+            )
+            for value in persisted_starts:
+                try:
+                    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+                    if parsed.tzinfo is None:
+                        parsed = parsed.replace(tzinfo=timezone.utc)
+                    parsed = parsed.astimezone(timezone.utc)
+                    if parsed <= finished_at:
+                        start_candidates.append(parsed)
+                except (TypeError, ValueError):
+                    pass
+            started_at = min(start_candidates) if start_candidates else None
             game_duration_seconds = (
                 (finished_at - started_at).total_seconds()
                 if started_at is not None
