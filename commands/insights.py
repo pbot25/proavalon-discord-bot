@@ -48,10 +48,9 @@ def format_outcome_split(values) -> str:
     games, resistance_wins, spy_wins = (int(value) for value in values)
     known = resistance_wins + spy_wins
     resistance_rate = resistance_wins / known * 100 if known else 0.0
-    spy_rate = spy_wins / known * 100 if known else 0.0
     return (
-        f"{games:,} games • Res WR {resistance_rate:.1f}% • "
-        f"Spy WR {spy_rate:.1f}%"
+        f"{games:,} games • Res WR {resistance_rate:.1f}% "
+        f"({resistance_wins:,}/{games:,})"
     )
 
 async def player_auto(interaction,current):
@@ -1018,24 +1017,24 @@ class PastSeason(commands.GroupCog, group_name="past-season", group_description=
         embed.add_field(
             name="Mission 1 Outcomes",
             value=(
-                f"**Passes:** {summary['m1_passes']:,} "
+                f"*Passes:* {summary['m1_passes']:,} "
                 f"({summary['m1_passes'] / m1_total * 100 if m1_total else 0:.1f}%)\n"
                 f"↳ {format_outcome_split(summary['m1_outcomes']['Pass'])}\n"
-                f"**Fails:** {summary['m1_fails']:,} "
+                f"*Fails:* {summary['m1_fails']:,} "
                 f"({summary['m1_fails'] / m1_total * 100 if m1_total else 0:.1f}%)\n"
                 f"↳ {format_outcome_split(summary['m1_outcomes']['Fail'])}"
             ),
             inline=False,
         )
         hammer_lines = [
-            f"**Resistance hammer:** "
+            f"*Resistance hammer:* "
             f"{format_outcome_split(summary['m1_hammer_outcomes']['Resistance'])}",
-            f"**Spy hammer:** "
+            f"*Spy hammer:* "
             f"{format_outcome_split(summary['m1_hammer_outcomes']['Spy'])}",
         ]
         if summary["m1_hammer"]["Unknown"]:
             hammer_lines.append(
-                f"**Unknown hammer:** "
+                f"*Unknown hammer:* "
                 f"{format_outcome_split(summary['m1_hammer_outcomes']['Unknown'])}"
             )
         hammer_coverage = sum(summary["m1_hammer"].values())
@@ -1048,14 +1047,14 @@ class PastSeason(commands.GroupCog, group_name="past-season", group_description=
             inline=False,
         )
         start_lines = [
-            f"**Starts with Resistance:** "
+            f"*Starts with Resistance:* "
             f"{format_outcome_split(summary['card_start_outcomes']['Resistance'])}",
-            f"**Starts with Spy:** "
+            f"*Starts with Spy:* "
             f"{format_outcome_split(summary['card_start_outcomes']['Spy'])}",
         ]
         if summary["card_starts"]["Unknown"]:
             start_lines.append(
-                f"**Unknown starting holder:** "
+                f"*Unknown starting holder:* "
                 f"{format_outcome_split(summary['card_start_outcomes']['Unknown'])}"
             )
         embed.add_field(
@@ -1064,14 +1063,14 @@ class PastSeason(commands.GroupCog, group_name="past-season", group_description=
             inline=False,
         )
         unused_lines = [
-            f"**Resistance held, never used:** "
+            f"*Resistance held, never used:* "
             f"{format_outcome_split(summary['card_unused_outcomes']['Resistance'])}",
-            f"**Spy held, never used:** "
+            f"*Spy held, never used:* "
             f"{format_outcome_split(summary['card_unused_outcomes']['Spy'])}",
         ]
         if summary["card_unused_outcomes"]["Unknown"][0]:
             unused_lines.append(
-                f"**Unknown holder, never used:** "
+                f"*Unknown holder, never used:* "
                 f"{format_outcome_split(summary['card_unused_outcomes']['Unknown'])}"
             )
         embed.add_field(
@@ -1082,7 +1081,7 @@ class PastSeason(commands.GroupCog, group_name="past-season", group_description=
         transition_lines = []
         for label, (games, spy_wins) in summary["card_transitions"].items():
             transition_lines.append(
-                f"**{label}:** "
+                f"*{label}:* "
                 f"{format_outcome_split([games, games - spy_wins, spy_wins])}"
             )
         embed.add_field(
@@ -1096,7 +1095,7 @@ class PastSeason(commands.GroupCog, group_name="past-season", group_description=
             inline=False,
         )
         stopped_lines = [
-            f"**{label}:** {format_outcome_split(values)}"
+            f"*{label}:* {format_outcome_split(values)}"
             for label, values in summary["card_first_handoff_stops"].items()
         ]
         embed.add_field(
@@ -1107,11 +1106,11 @@ class PastSeason(commands.GroupCog, group_name="past-season", group_description=
         embed.add_field(
             name="Ref of the Rain — Handoff Count Summary",
             value=(
-                f"**Exactly zero handoffs:** "
+                f"*Zero handoffs:* "
                 f"{format_outcome_split(summary['card_exact_handoff_outcomes']['Zero'])}\n"
-                f"**Exactly one handoff:** "
+                f"*One handoff:* "
                 f"{format_outcome_split(summary['card_exact_handoff_outcomes']['One'])}\n"
-                f"**Exactly two handoffs:** "
+                f"*Two handoffs:* "
                 f"{format_outcome_split(summary['card_exact_handoff_outcomes']['Two'])}"
             ),
             inline=False,
@@ -1121,7 +1120,7 @@ class PastSeason(commands.GroupCog, group_name="past-season", group_description=
             if not games:
                 continue
             chain_lines.append(
-                f"**{label}:** "
+                f"*{label}:* "
                 f"{format_outcome_split([games, games - spy_wins, spy_wins])}"
             )
         embed.add_field(
