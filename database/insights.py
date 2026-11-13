@@ -6,6 +6,7 @@ from collections import defaultdict
 from datetime import datetime, timezone, timedelta
 from statistics import mean, median
 from database.connection import connect
+from utils.advanced_stats import m1_hammer_from_vote_history
 
 RES_ROLES={"resistance","tristan","isolde","percival","merlin","melron","moregano"}
 SPY_ROLES={"spy","assassin","morgana","mordred","oberon","hitberon","mordredassassin"}
@@ -373,6 +374,12 @@ def season_overview_summary(rows):
         "Spy→Resistance": [0, 0],
         "Spy→Spy": [0, 0],
     }
+    card_three_chains = {
+        f"{first}→{second}→{third}": [0, 0]
+        for first in ("Resistance", "Spy")
+        for second in ("Resistance", "Spy")
+        for third in ("Resistance", "Spy")
+    }
 
     def row_value(row, key, default=None):
         try:
@@ -408,12 +415,7 @@ def season_overview_summary(rows):
         hammer_alignment = row_value(row, "m1_hammer_alignment")
         if not hammer_leader:
             votes = _j(row_value(row, "vote_history_json"), {})
-            for name in players:
-                history = votes.get(name) or votes.get(str(name).casefold()) or []
-                picks = history[0] if history and isinstance(history[0], list) else []
-                if len(picks) >= 5 and "VHleader" in str(picks[4]):
-                    hammer_leader = str(name)
-                    break
+            hammer_leader = m1_hammer_from_vote_history(players, votes)
         if hammer_leader is not None:
             hammer_alignment = (
                 hammer_alignment
@@ -449,11 +451,16 @@ def season_overview_summary(rows):
                 winner == "Resistance"
             )
             card_start_outcomes[starting_alignment][2] += int(winner == "Spy")
-        for first, second in zip(holder_alignments, holder_alignments[1:]):
-            key = f"{first}→{second}"
+        if len(holder_alignments) >= 2:
+            key = f"{holder_alignments[0]}→{holder_alignments[1]}"
             if key in card_transitions:
                 card_transitions[key][0] += 1
                 card_transitions[key][1] += int(winner == "Spy")
+        if len(holder_alignments) >= 3:
+            chain_key = "→".join(holder_alignments[:3])
+            if chain_key in card_three_chains:
+                card_three_chains[chain_key][0] += 1
+                card_three_chains[chain_key][1] += int(winner == "Spy")
 
     durations = [seconds for seconds, _ in timed_matches]
     shortest = min(timed_matches, key=lambda item: item[0], default=None)
@@ -491,6 +498,7 @@ def season_overview_summary(rows):
         "card_starts": card_starts,
         "card_start_outcomes": card_start_outcomes,
         "card_transitions": card_transitions,
+        "card_three_chains": card_three_chains,
     }
 
 def relationships(rows,username):

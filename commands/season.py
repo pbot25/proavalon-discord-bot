@@ -1690,6 +1690,10 @@ class SeasonCommands(
                 f"**Unknown hammer:** "
                 f"{format_outcome_split(summary['m1_hammer_outcomes']['Unknown'])}"
             )
+        hammer_coverage = sum(summary["m1_hammer"].values())
+        hammer_lines.append(
+            f"**Coverage:** {hammer_coverage:,}/{summary['matches']:,} matches"
+        )
         embed.add_field(
             name="Mission 1 Hammer",
             value="\n".join(hammer_lines),
@@ -1721,11 +1725,29 @@ class SeasonCommands(
                 f"{format_outcome_split([games, resistance_wins, spy_wins])}"
             )
         embed.add_field(
-            name="Ref of the Rain — Transfers",
+            name="Ref of the Rain — First Handoff",
             value=(
                 "\n".join(transition_lines)
-                + "\n*Card-history coverage begins with matches recorded after "
-                "card persistence was added.*"
+                + f"\n**Handoff coverage:** "
+                f"{sum(item[0] for item in summary['card_transitions'].values()):,}/"
+                f"{summary['matches']:,} matches"
+            ),
+            inline=False,
+        )
+
+        chain_lines = []
+        for label, (games, spy_wins) in summary["card_three_chains"].items():
+            if not games:
+                continue
+            chain_lines.append(
+                f"**{label}:** "
+                f"{format_outcome_split([games, games - spy_wins, spy_wins])}"
+            )
+        embed.add_field(
+            name="Ref of the Rain — First Three Holders",
+            value=(
+                "\n".join(chain_lines) if chain_lines
+                else "No matches recorded a third holder."
             ),
             inline=False,
         )

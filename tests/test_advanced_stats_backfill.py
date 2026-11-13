@@ -41,6 +41,22 @@ class AdvancedStatsBackfillTests(unittest.TestCase):
         self.assertIsNotNone(chart)
         self.assertIsNone(hammer_from_vote_chart(chart, players))
 
+    def test_infers_hammer_when_m1_approves_on_first_proposal(self) -> None:
+        players = [f"S5Player{index}" for index in range(10)]
+        history = {
+            player: [["VHreject"]]
+            for player in players
+        }
+        history[players[0]][0][0] = "VHapprove VHleader"
+        chart = build_vote_history_png({
+            "playerUsernamesOrdered": players,
+            "voteHistory": history,
+            "missionHistory": ["succeeded"],
+            "numFailsHistory": [0],
+            "see": {"roles": ["Resistance"] * 10},
+        })
+        self.assertEqual(hammer_from_vote_chart(chart, players), players[6])
+
 
 if __name__ == "__main__":
     unittest.main()

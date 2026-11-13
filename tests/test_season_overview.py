@@ -110,6 +110,30 @@ class SeasonOverviewTests(unittest.TestCase):
             summary["m1_hammer_outcomes"]["Resistance"], [1, 1, 0]
         )
 
+    def test_ref_stats_use_only_first_handoff_and_separate_three_holder_chain(self) -> None:
+        rows = [{
+            "season_match_id": 3,
+            "winner": "Spy",
+            "game_duration_seconds": 600,
+            "assassination_duration_seconds": None,
+            "mission_history_json": '["failed"]',
+            "youtube_url": None,
+            "players_json": '["ResA", "SpyA"]',
+            "roles_json": '["Resistance", "Assassin"]',
+            "vote_history_json": None,
+            "card_history_json": (
+                '{"Ref of the Rain":["SpyA", "ResA", "SpyA"]}'
+            ),
+            "m1_hammer_username": None,
+            "m1_hammer_alignment": None,
+        }]
+        summary = season_overview_summary(rows)
+        self.assertEqual(summary["card_transitions"]["Spy→Resistance"], [1, 1])
+        self.assertEqual(summary["card_transitions"]["Resistance→Spy"], [0, 0])
+        self.assertEqual(
+            summary["card_three_chains"]["Spy→Resistance→Spy"], [1, 1]
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

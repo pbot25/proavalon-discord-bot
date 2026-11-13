@@ -211,6 +211,68 @@ async def upsert_online_ratings(
     return len(cleaned)
 
 
+async def upsert_observed_rating(
+    username: str,
+    rating: int,
+    rating_bracket: str | None = None,
+) -> RatingSnapshot:
+    """Persist a direct profile observation without marking the user online."""
+    clean_username = username.strip()
+    now = utc_now()
+    previous = get_cached_rating(clean_username)
+    bracket = (
+        rating_bracket.strip().casefold()
+        if isinstance(rating_bracket, str) and rating_bracket.strip()
+        else previous.rating_bracket if previous is not None else None
+    )
+    last_seen = (
+        previous.last_seen_online_at if previous is not None else now
+    )
+    database = await connect()
+    try:
+        await database.execute(
+            """
+            INSERT INTO proavalon_ratings(
+                proavalon_username, rating, rating_bracket,
+                last_seen_online_at, rating_updated_at
+            ) VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(proavalon_username) DO UPDATE SET
+                rating = excluded.rating,
+                rating_bracket = COALESCE(
+                    excluded.rating_bracket,
+                    proavalon_ratings.rating_bracket
+                ),
+                rating_updated_at = excluded.rating_updated_at
+            """,
+            (clean_username, int(rating), bracket, last_seen, now),
+        )
+        await database.execute(
+            """
+            INSERT INTO proavalon_rating_extremes(
+                proavalon_username, minimum_rating, maximum_rating, updated_at
+            ) VALUES (?, ?, ?, ?)
+            ON CONFLICT(proavalon_username) DO UPDATE SET
+                minimum_rating = MIN(minimum_rating, excluded.minimum_rating),
+                maximum_rating = MAX(maximum_rating, excluded.maximum_rating),
+                updated_at = excluded.updated_at
+            """,
+            (clean_username, int(rating), int(rating), now),
+        )
+        await database.commit()
+    finally:
+        await database.close()
+
+    snapshot = RatingSnapshot(
+        username=clean_username,
+        rating=int(rating),
+        rating_bracket=bracket,
+        last_seen_online_at=last_seen,
+        rating_updated_at=now,
+    )
+    _rating_cache[clean_username.casefold()] = snapshot
+    return snapshot
+
+
 async def get_rating_extremes(username: str) -> tuple[int | None, int | None]:
     """Return extremes merged from live observations and archived matches."""
     database = await connect()

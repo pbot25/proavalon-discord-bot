@@ -10,6 +10,7 @@ from PIL import Image
 
 from database.connection import connect
 from database.insights import alignment
+from utils.advanced_stats import clockwise_player_order
 
 
 MATCH_TITLE = re.compile(
@@ -75,6 +76,17 @@ def _line_column(image: Image.Image, x: int) -> bool:
     return hits >= 16
 
 
+def _mission_header_boundary(image: Image.Image, x: int) -> bool:
+    if x < 0 or x >= image.width:
+        return False
+    hits = 0
+    for y in range(2, min(42, image.height)):
+        red, green, blue = image.getpixel((x, y))[:3]
+        if max(red, green, blue) < 175:
+            hits += 1
+    return hits >= 28
+
+
 def hammer_from_vote_chart(
     image_bytes: bytes,
     players: list[str],
@@ -84,7 +96,7 @@ def hammer_from_vote_chart(
         image = Image.open(BytesIO(image_bytes)).convert("RGB")
     except Exception:
         return None
-    if image.height < 74 + 42 * len(players) or image.width < 300:
+    if image.height < 74 + 42 * len(players) or image.width < 100:
         return None
 
     name_width = next(
@@ -97,24 +109,44 @@ def hammer_from_vote_chart(
     if name_width is None:
         return None
 
-    fifth_proposal_x = name_width + (4 * 52)
-    if fifth_proposal_x + 52 >= image.width:
+    max_columns = max(0, (image.width - name_width - 2) // 52)
+    m1_proposals = next(
+        (
+            count for count in range(1, max_columns + 1)
+            if _mission_header_boundary(image, name_width + count * 52)
+        ),
+        None,
+    )
+    if not m1_proposals:
         return None
 
-    ordered = [players[0], *reversed(players[1:])] if players else []
-    for row_index, username in enumerate(ordered):
-        y = 74 + row_index * 42
-        # A leader cell has a three-pixel #222 border two pixels inside the
-        # ordinary grid. The regular cell border and picked-player X do not
-        # produce a long dark run at this position.
-        dark = 0
-        for x in range(fifth_proposal_x + 2, fifth_proposal_x + 50):
-            red, green, blue = image.getpixel((x, y + 2))[:3]
-            if max(red, green, blue) < 70:
-                dark += 1
-        if dark >= 30:
-            return str(username)
-    return None
+    ordered = clockwise_player_order(players)
+    leaders: list[tuple[int, int]] = []
+    for proposal_index in range(m1_proposals):
+        proposal_x = name_width + proposal_index * 52
+        for row_index, _ in enumerate(ordered):
+            y = 74 + row_index * 42
+            dark = 0
+            for x in range(proposal_x + 2, proposal_x + 50):
+                red, green, blue = image.getpixel((x, y + 2))[:3]
+                if max(red, green, blue) < 70:
+                    dark += 1
+            if dark >= 30:
+                leaders.append((proposal_index, row_index))
+                break
+    if not leaders:
+        return None
+
+    direction = 1
+    if len(leaders) >= 2:
+        delta = (leaders[1][1] - leaders[0][1]) % len(ordered)
+        if delta == len(ordered) - 1:
+            direction = -1
+    proposal_index, leader_row = leaders[0]
+    hammer_row = (
+        leader_row + direction * (4 - proposal_index)
+    ) % len(ordered)
+    return ordered[hammer_row]
 
 
 async def _match_index(guild_id: int):

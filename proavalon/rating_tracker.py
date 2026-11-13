@@ -20,6 +20,7 @@ from database.recording_audit import append_recording_audit
 from database.ratings import (
     get_cached_rating,
     load_rating_cache,
+    upsert_observed_rating,
     upsert_online_ratings,
 )
 from database.discord_roles import get_active_season_linked_users
@@ -29,6 +30,7 @@ from database.seasons import (
     register_season_player,
 )
 from proavalon.vote_chart import build_vote_history_png
+from utils.advanced_stats import m1_hammer_from_vote_history
 from database.voting_metrics import final_third_fail_wrong_voters_from_live_data
 
 
@@ -610,10 +612,62 @@ class ProAvalonRatingTracker:
             data = state["last_data"]
             real_players = self._room_rosters.get(room_id) or data.get("playerUsernamesOrdered") or []
             roles = ((data.get("see") or {}).get("roles") or [])
+
+            # Give the ordinary online-player broadcast a few more seconds to
+            # publish postgame ratings. Anyone who leaves before that update
+            # is then refreshed directly from their profile instead of being
+            # incorrectly shown as a 0-point change.
+            for _ in range(5):
+                stale = [
+                    name for name in real_players
+                    if state["pre"].get(name.casefold()) is not None
+                    and (
+                        get_cached_rating(name) is None
+                        or get_cached_rating(name).rating
+                        == state["pre"][name.casefold()]["rating"]
+                    )
+                ]
+                if not stale:
+                    break
+                await asyncio.sleep(1)
+
+            stale = [
+                name for name in real_players
+                if state["pre"].get(name.casefold()) is not None
+                and (
+                    get_cached_rating(name) is None
+                    or get_cached_rating(name).rating
+                    == state["pre"][name.casefold()]["rating"]
+                )
+            ]
+            for name in stale:
+                try:
+                    canonical, rating, bracket = await asyncio.wait_for(
+                        self.scraper.get_current_rating(name),
+                        timeout=20,
+                    )
+                    if rating is not None:
+                        await upsert_observed_rating(
+                            canonical,
+                            rating,
+                            bracket,
+                        )
+                except Exception as error:
+                    print(
+                        f"Could not refresh offline postgame rating for "
+                        f"{name}: {type(error).__name__}: {error}"
+                    )
+
             changes = []
             for idx, name in enumerate(real_players):
                 before = state["pre"].get(name.casefold())
                 after = get_cached_rating(name)
+                if (
+                    before is not None
+                    and after is not None
+                    and after.rating == before["rating"]
+                ):
+                    after = None
                 changes.append({
                     "username": name,
                     "role": roles[idx] if idx < len(roles) else None,
@@ -664,19 +718,10 @@ class ProAvalonRatingTracker:
                 )
                 for index, name in enumerate(real_players)
             }
-            m1_hammer_username = None
             votes = data.get("voteHistory") or {}
-            if isinstance(votes, dict):
-                for name in real_players:
-                    history = votes.get(name) or votes.get(str(name).casefold()) or []
-                    first_mission = (
-                        history[0]
-                        if history and isinstance(history[0], list)
-                        else []
-                    )
-                    if len(first_mission) >= 5 and "VHleader" in str(first_mission[4]):
-                        m1_hammer_username = str(name)
-                        break
+            m1_hammer_username = m1_hammer_from_vote_history(
+                list(real_players), votes
+            )
             hammer_role = roles_by_name.get(
                 str(m1_hammer_username or "").casefold(), ""
             ).replace(" ", "").casefold()

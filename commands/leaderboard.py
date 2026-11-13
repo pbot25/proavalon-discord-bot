@@ -65,7 +65,7 @@ LEADERBOARD_CHOICES = [
     app_commands.Choice(name="Crit Voting Accuracy", value="crit_accuracy"),
     app_commands.Choice(name="Crit Errors", value="crit_errors"),
     app_commands.Choice(
-        name="False Merlin Shots",
+        name="False Merlin Shot Rate",
         value="false_merlin_shots",
     ),
     app_commands.Choice(name="Overall WR", value="overall"),
@@ -94,7 +94,7 @@ DISPLAY_NAMES = {
     "rating": "Rating",
     "crit_accuracy": "Crit Voting Accuracy",
     "crit_errors": "Crit Errors",
-    "false_merlin_shots": "False Merlin Shots",
+    "false_merlin_shots": "False Merlin Shot Rate",
     "overall": "Overall Win Rate",
     "resistance": "Resistance Win Rate",
     "spy": "Spy Win Rate",
@@ -361,8 +361,8 @@ def sort_entries(
         return sorted(
             entries,
             key=lambda entry: (
-                -entry.wins,
                 -entry.win_rate,
+                -entry.wins,
                 -entry.games,
                 entry.username.casefold(),
             ),

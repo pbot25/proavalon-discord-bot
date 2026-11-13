@@ -1,5 +1,6 @@
 import asyncio
 import json
+import re
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -202,6 +203,7 @@ class ProAvalonProfileScraper:
 
         self._session: aiohttp.ClientSession | None = None
         self._logged_in = False
+        self._profile_page_ratings: dict[str, int] = {}
 
     async def __aenter__(self) -> "ProAvalonProfileScraper":
         await self.start()
@@ -484,6 +486,7 @@ class ProAvalonProfileScraper:
             )
 
         rating_bracket: str | None = None
+        numeric_rating: int | None = None
 
         valid_brackets = {
             "iron",
@@ -506,20 +509,62 @@ class ProAvalonProfileScraper:
                 strip=True,
             ).casefold()
 
-            if label != "rank:":
-                continue
-
-            bracket_text = cells[1].get_text(
+            value_text = cells[1].get_text(
                 " ",
                 strip=True,
             )
 
-            if bracket_text.casefold() in valid_brackets:
-                rating_bracket = bracket_text.title()
+            if label == "rank:" and value_text.casefold() in valid_brackets:
+                rating_bracket = value_text.title()
+            elif label in {"rating:", "mmr:"}:
+                match = re.search(r"-?\d[\d,]*", value_text)
+                if match is not None:
+                    try:
+                        numeric_rating = int(match.group(0).replace(",", ""))
+                    except ValueError:
+                        pass
 
-            break
+        if numeric_rating is not None:
+            self._profile_page_ratings[
+                canonical_username.casefold()
+            ] = numeric_rating
 
         return canonical_username, rating_bracket
+
+    async def get_current_rating(
+        self,
+        username: str,
+    ) -> tuple[str, int | None, str | None]:
+        """Read a player's current rating even when they are not in the lobby."""
+        canonical_username, bracket = await self._get_profile_page_identity(
+            username
+        )
+        rating = self._profile_page_ratings.get(
+            canonical_username.casefold()
+        )
+        if rating is not None:
+            return canonical_username, rating, bracket
+
+        payload = await self.get_raw_profile_data(canonical_username)
+        user_data = payload.get("userData") or {}
+        if isinstance(user_data, dict):
+            for key in (
+                "playerRating",
+                "currentRating",
+                "rating",
+                "mmr",
+                "rankPoints",
+            ):
+                value = user_data.get(key)
+                if isinstance(value, bool):
+                    continue
+                try:
+                    parsed = int(str(value).replace(",", ""))
+                except (TypeError, ValueError):
+                    continue
+                return canonical_username, parsed, bracket
+
+        return canonical_username, None, bracket
 
     async def resolve_username_case(
         self,

@@ -4,6 +4,7 @@ from database.assassination_stats import (
     MerlinShotStats,
     assassination_role_bucket,
 )
+from commands.leaderboard import LeaderboardEntry, sort_entries
 
 
 class AssassinationStatsTests(unittest.TestCase):
@@ -33,6 +34,27 @@ class AssassinationStatsTests(unittest.TestCase):
         self.assertEqual(stats.false_merlin_shots, 6)
         self.assertEqual(stats.false_shot_rate, 30.0)
         self.assertEqual(stats.total_shots, 10)
+
+    def test_false_merlin_leaderboard_sorts_by_percentage(self) -> None:
+        entries = [
+            LeaderboardEntry(
+                username="MoreShots",
+                games=100,
+                wins=40,
+                losses=60,
+            ),
+            LeaderboardEntry(
+                username="HigherRate",
+                games=10,
+                wins=5,
+                losses=5,
+            ),
+        ]
+        ranked = sort_entries(entries, "false_merlin_shots")
+        self.assertEqual(
+            [entry.username for entry in ranked],
+            ["HigherRate", "MoreShots"],
+        )
 
 
 if __name__ == "__main__":
