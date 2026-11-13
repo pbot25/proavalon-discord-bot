@@ -44,6 +44,8 @@ class SeasonOverviewTests(unittest.TestCase):
         self.assertEqual(summary["matches"], 4)
         self.assertEqual(summary["resistance_wins"], 2)
         self.assertEqual(summary["spy_wins"], 1)
+        self.assertEqual(summary["spy_board_wins"], 1)
+        self.assertEqual(summary["spy_assassination_wins"], 0)
         self.assertAlmostEqual(summary["resistance_win_rate"], 66.666, places=2)
         self.assertAlmostEqual(summary["spy_win_rate"], 33.333, places=2)
         self.assertEqual(summary["unknown_results"], 1)
@@ -62,6 +64,29 @@ class SeasonOverviewTests(unittest.TestCase):
         self.assertIsNone(summary["average_duration_seconds"])
         self.assertEqual(summary["resistance_win_rate"], 0.0)
         self.assertEqual(summary["spy_win_rate"], 0.0)
+
+    def test_spy_win_method_breakdown(self) -> None:
+        rows = [
+            {
+                "winner": "Spy",
+                "mission_history_json": '["failed", "succeeded", "failed", "failed"]',
+                "game_duration_seconds": None,
+                "assassination_duration_seconds": None,
+                "youtube_url": None,
+            },
+            {
+                "winner": "Spy",
+                "mission_history_json": '["succeeded", "failed", "succeeded", "succeeded"]',
+                "game_duration_seconds": None,
+                "assassination_duration_seconds": 20,
+                "youtube_url": None,
+            },
+        ]
+
+        summary = season_overview_summary(rows)
+        self.assertEqual(summary["spy_wins"], 2)
+        self.assertEqual(summary["spy_board_wins"], 1)
+        self.assertEqual(summary["spy_assassination_wins"], 1)
 
     def test_m1_hammer_and_card_metrics(self) -> None:
         players = ["ResA", "SpyA"]

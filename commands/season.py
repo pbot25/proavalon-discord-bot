@@ -1577,7 +1577,11 @@ class SeasonCommands(
             ),
             (
                 f"**Spies:** {summary['spy_wins']:,} wins • "
-                f"**{summary['spy_win_rate']:.1f}%**"
+                f"**{summary['spy_win_rate']:.1f}%**\n"
+                f"↳ *Three failed missions:* "
+                f"{summary['spy_board_wins']:,}\n"
+                f"↳ *Correct assassination:* "
+                f"{summary['spy_assassination_wins']:,}"
             ),
         ]
         if summary["unknown_results"]:

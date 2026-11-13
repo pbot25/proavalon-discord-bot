@@ -322,6 +322,20 @@ def season_overview_summary(rows):
     spy_wins = sum(
         1 for row in matches if winner_norm(row["winner"]) == "Spy"
     )
+    spy_board_wins = 0
+    spy_assassination_wins = 0
+    for row in matches:
+        if winner_norm(row["winner"]) != "Spy":
+            continue
+        missions = _j(row["mission_history_json"], [])
+        failed_missions = sum(
+            1 for mission in missions
+            if str(mission).casefold() == "failed"
+        )
+        if failed_missions >= 3:
+            spy_board_wins += 1
+        else:
+            spy_assassination_wins += 1
     known_results = resistance_wins + spy_wins
 
     timed_matches = []
@@ -518,6 +532,8 @@ def season_overview_summary(rows):
         "unknown_results": len(matches) - known_results,
         "resistance_wins": resistance_wins,
         "spy_wins": spy_wins,
+        "spy_board_wins": spy_board_wins,
+        "spy_assassination_wins": spy_assassination_wins,
         "resistance_win_rate": (
             resistance_wins / known_results * 100 if known_results else 0.0
         ),
