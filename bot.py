@@ -24,7 +24,6 @@ PROAVALON_PASSWORD = os.getenv("PROAVALON_PASSWORD")
 
 GATEWAY_CHECK_SECONDS = 30
 GATEWAY_RECOVERY_SECONDS = 180
-GATEWAY_SILENCE_SECONDS = 180
 
 
 if not DISCORD_TOKEN:
@@ -64,7 +63,7 @@ class ProAvalonBot(commands.Bot):
         self.resources_closed = False
 
     async def gateway_watchdog(self) -> None:
-        """Recycle Pbot when Discord disconnects or its gateway becomes stale."""
+        """Recycle Pbot only after Discord is demonstrably disconnected."""
         try:
             await self.wait_until_ready()
             self.gateway_was_ready = True
@@ -81,7 +80,6 @@ class ProAvalonBot(commands.Bot):
                 ready_and_alive = (
                     self.is_ready()
                     and math.isfinite(latency)
-                    and silent_for < GATEWAY_SILENCE_SECONDS
                 )
                 if ready_and_alive:
                     self.gateway_disconnected_at = None
@@ -209,8 +207,10 @@ def create_bot() -> ProAvalonBot:
 
     @bot.event
     async def on_socket_raw_receive(message: str | bytes) -> None:
-        # Heartbeat acknowledgements pass through the raw receive hook. This
-        # detects a half-open connection even if discord.py still says ready.
+        # Retain this timestamp for diagnostics only. Some discord.py gateway
+        # paths do not expose heartbeat acknowledgements through this hook, so
+        # message silence must not be treated as a failed connection while the
+        # client remains ready with healthy heartbeat latency.
         bot.gateway_last_receive_at = time.monotonic()
 
     @bot.tree.command(
