@@ -27,6 +27,29 @@ class ProAvalonResponseError(ProAvalonError):
     """Raised when ProAvalon returns an unexpected response."""
 
 
+def current_rating_from_sources(
+    user_data: object,
+    page_rating: int | None,
+) -> int | None:
+    """Prefer the fresher profile API rating over rendered-page data."""
+    if isinstance(user_data, dict):
+        for key in (
+            "playerRating",
+            "currentRating",
+            "rating",
+            "mmr",
+            "rankPoints",
+        ):
+            value = user_data.get(key)
+            if isinstance(value, bool):
+                continue
+            try:
+                return int(str(value).replace(",", ""))
+            except (TypeError, ValueError):
+                continue
+    return page_rating
+
+
 @dataclass(frozen=True)
 class RoleRecord:
     wins: int
@@ -422,6 +445,7 @@ class ProAvalonProfileScraper:
             async with session.get(
                 url,
                 allow_redirects=True,
+                headers={"Cache-Control": "no-cache", "Pragma": "no-cache"},
             ) as response:
                 response_text = await response.text()
 
@@ -539,32 +563,19 @@ class ProAvalonProfileScraper:
         canonical_username, bracket = await self._get_profile_page_identity(
             username
         )
-        rating = self._profile_page_ratings.get(
-            canonical_username.casefold()
-        )
-        if rating is not None:
-            return canonical_username, rating, bracket
-
+        # The JSON profile endpoint updates sooner than the rendered profile
+        # page after a match. Prefer it so a player leaving during the shot
+        # phase cannot leave us with the page's stale pregame rating.
         payload = await self.get_raw_profile_data(canonical_username)
         user_data = payload.get("userData") or {}
-        if isinstance(user_data, dict):
-            for key in (
-                "playerRating",
-                "currentRating",
-                "rating",
-                "mmr",
-                "rankPoints",
-            ):
-                value = user_data.get(key)
-                if isinstance(value, bool):
-                    continue
-                try:
-                    parsed = int(str(value).replace(",", ""))
-                except (TypeError, ValueError):
-                    continue
-                return canonical_username, parsed, bracket
-
-        return canonical_username, None, bracket
+        return (
+            canonical_username,
+            current_rating_from_sources(
+                user_data,
+                self._profile_page_ratings.get(canonical_username.casefold()),
+            ),
+            bracket,
+        )
 
     async def resolve_username_case(
         self,
@@ -663,6 +674,7 @@ class ProAvalonProfileScraper:
                 async with session.get(
                     url,
                     allow_redirects=True,
+                    headers={"Cache-Control": "no-cache", "Pragma": "no-cache"},
                 ) as response:
 
                     response_text = await response.text()

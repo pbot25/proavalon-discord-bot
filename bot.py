@@ -145,6 +145,7 @@ class ProAvalonBot(commands.Bot):
         await self.load_extension("commands.account")
         await self.load_extension("commands.season")
         await self.load_extension("commands.stats")
+        await self.load_extension("commands.activity")
         await self.load_extension("commands.leaderboard")
         await self.load_extension("commands.insights")
         await self.load_extension("commands.roles")

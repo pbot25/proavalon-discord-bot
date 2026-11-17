@@ -641,32 +641,42 @@ class ProAvalonRatingTracker:
                     break
                 await asyncio.sleep(1)
 
-            stale = [
-                name for name in real_players
-                if state["pre"].get(name.casefold()) is not None
-                and (
-                    get_cached_rating(name) is None
-                    or get_cached_rating(name).rating
-                    == state["pre"][name.casefold()]["rating"]
-                )
-            ]
-            for name in stale:
-                try:
-                    canonical, rating, bracket = await asyncio.wait_for(
-                        self.scraper.get_current_rating(name),
-                        timeout=20,
+            # ProAvalon's profile API can trail the game result by several
+            # seconds. Retry unresolved players instead of converting an old
+            # pregame value into +0 or giving up as N/A after one lookup.
+            for attempt, retry_delay in enumerate((0, 5, 10, 15), start=1):
+                stale = [
+                    name for name in real_players
+                    if state["pre"].get(name.casefold()) is not None
+                    and (
+                        get_cached_rating(name) is None
+                        or get_cached_rating(name).rating
+                        == state["pre"][name.casefold()]["rating"]
                     )
-                    if rating is not None:
-                        await upsert_observed_rating(
-                            canonical,
-                            rating,
-                            bracket,
+                ]
+                if not stale:
+                    break
+                if retry_delay:
+                    await asyncio.sleep(retry_delay)
+                for name in stale:
+                    before_rating = state["pre"][name.casefold()]["rating"]
+                    try:
+                        canonical, rating, bracket = await asyncio.wait_for(
+                            self.scraper.get_current_rating(name),
+                            timeout=30,
                         )
-                except Exception as error:
-                    print(
-                        f"Could not refresh offline postgame rating for "
-                        f"{name}: {type(error).__name__}: {error}"
-                    )
+                        if rating is not None and rating != before_rating:
+                            await upsert_observed_rating(
+                                canonical,
+                                rating,
+                                bracket,
+                            )
+                    except Exception as error:
+                        print(
+                            f"Could not refresh offline postgame rating for "
+                            f"{name} (attempt {attempt}/4): "
+                            f"{type(error).__name__}: {error}"
+                        )
 
             changes = []
             for idx, name in enumerate(real_players):
