@@ -7,7 +7,7 @@ import re
 import discord
 from discord import app_commands
 from discord.ext import commands
-from database.insights import active_or_latest,season_rows,recent_rows,find_match,registered_usernames,all_links_for_discord,bot_status_data,unpack,player_summary,streak_summary,role_summary,alignment_summary,role_board,activity_summary,season_records,season_overview_summary,ratings_for_usernames,relationships,season_match_player_names,season_player_discord_links,search_matches_by_players,guild_match_player_names,search_guild_matches_by_players,winner_norm
+from database.insights import active_or_latest,season_rows,recent_rows,find_match,registered_usernames,all_links_for_discord,bot_status_data,unpack,player_summary,streak_summary,role_summary,alignment_summary,role_board,season_records,season_overview_summary,ratings_for_usernames,relationships,season_match_player_names,season_player_discord_links,search_matches_by_players,guild_match_player_names,search_guild_matches_by_players,winner_norm
 from utils.permissions import bot_admin_only
 from database.account_links import get_preferred_link_for_discord
 from database.social_stats import build_player_social_stats, get_season_matches
@@ -582,17 +582,6 @@ class Insights(commands.Cog):
         for k in ('Resistance','Spy'):
             v=x.get(k,{'games':0,'wins':0,'losses':0,'wr':0}); e.add_field(name=k,value=f"{v['wins']}W-{v['losses']}L • {v['wr']:.1f}% WR • {v['games']} GP",inline=False)
         await interaction.response.send_message(embed=e)
-
-    @app_commands.command(name='activity',description='Shows recent season activity for a player.')
-    @app_commands.describe(username='ProAvalon username.', discord_user='Linked Discord @ to look up.', days='Number of recent days to analyze. Defaults to 7.')
-    @app_commands.autocomplete(username=player_auto)
-    async def activity(self,interaction:discord.Interaction,username:str|None=None,discord_user:discord.Member|None=None,days:app_commands.Range[int,1,365]=7):
-        s,u,error=await resolve_name(interaction,username,discord_user)
-        if error: return await interaction.response.send_message(error,ephemeral=True)
-        x=activity_summary(await season_rows(s['id']),u,days)
-        if not x: return await interaction.response.send_message('No data found.',ephemeral=True)
-        wr=x['wins']/x['games']*100 if x['games'] else 0
-        await interaction.response.send_message(embed=discord.Embed(title=f'{u} — Activity',description=f"Last {days} days: **{x['games']} games** • **{wr:.1f}% WR**\nBusiest day: **{x['busiest_day'] or 'N/A'}** ({x['busiest_count']} games)\nLast tracked game: **{fmt_date(x['last'])}**",color=discord.Color.blurple()))
 
     @app_commands.command(name='player-history',description='Shows remembered accounts and archived results across seasons.')
     async def player_history(self,interaction:discord.Interaction,discord_user:discord.Member|None=None,discord_user_id:str|None=None):

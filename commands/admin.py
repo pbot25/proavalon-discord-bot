@@ -90,6 +90,8 @@ def _walk(command):
 def _category(command) -> str:
     root = command.root_parent
     if root is not None:
+        if root.name == "activity":
+            return "Stats"
         return root.name.replace("-", " ").title()
     name = command.name
     if name in {"leaderboard", "role-leaderboard", "records"}:

@@ -56,11 +56,36 @@ class ProAvalonBot(commands.Bot):
         )
         self.recorder_bridge = RecorderBridge(self)
         self.gateway_watchdog_task: asyncio.Task | None = None
+        self.proavalon_login_task: asyncio.Task | None = None
         self.gateway_disconnected_at: float | None = None
         self.gateway_last_receive_at: float | None = None
         self.gateway_was_ready = False
         self.restart_requested = False
         self.resources_closed = False
+
+    async def retry_proavalon_login(self) -> None:
+        """Restore ProAvalon access without taking Discord commands offline."""
+        delay = 5 * 60
+        while not self.is_closed() and not self.resources_closed:
+            print(
+                f"ProAvalon login unavailable; retrying in {delay // 60} "
+                "minute(s) while Discord commands remain online.",
+                flush=True,
+            )
+            try:
+                await asyncio.sleep(delay)
+                await self.proavalon_scraper.login(
+                    username=PROAVALON_USERNAME,
+                    password=PROAVALON_PASSWORD,
+                )
+            except asyncio.CancelledError:
+                raise
+            except ProAvalonLoginError as error:
+                print(f"ProAvalon login retry failed: {error}", flush=True)
+                delay = min(delay * 2, 60 * 60)
+                continue
+            print("ProAvalon login recovered successfully.", flush=True)
+            return
 
     async def gateway_watchdog(self) -> None:
         """Recycle Pbot only after Discord is demonstrably disconnected."""
@@ -135,11 +160,18 @@ class ProAvalonBot(commands.Bot):
                 username=PROAVALON_USERNAME,
                 password=PROAVALON_PASSWORD,
             )
-        except ProAvalonLoginError:
-            await self.proavalon_scraper.close()
-            raise
-
-        print("ProAvalon login successful.")
+        except ProAvalonLoginError as error:
+            print(
+                f"ProAvalon login is temporarily unavailable: {error}. "
+                "Continuing startup with database-backed Discord commands.",
+                flush=True,
+            )
+            self.proavalon_login_task = asyncio.create_task(
+                self.retry_proavalon_login(),
+                name="proavalon-login-retry",
+            )
+        else:
+            print("ProAvalon login successful.")
 
         await self.load_extension("commands.admin")
         await self.load_extension("commands.account")
@@ -171,6 +203,9 @@ class ProAvalonBot(commands.Bot):
         watchdog = self.gateway_watchdog_task
         if watchdog is not None and watchdog is not asyncio.current_task():
             watchdog.cancel()
+        login_retry = self.proavalon_login_task
+        if login_retry is not None and login_retry is not asyncio.current_task():
+            login_retry.cancel()
         print("Closing recorder bridge...")
         try:
             await asyncio.wait_for(self.recorder_bridge.close(), timeout=15)
