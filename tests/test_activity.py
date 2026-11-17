@@ -1,7 +1,11 @@
 import unittest
 from datetime import datetime, timezone
 
-from commands.activity import resolve_activity_period
+from commands.activity import (
+    _activity_table,
+    resolve_activity_period,
+    sort_activity_entries,
+)
 from database.activity import build_activity_stats
 
 
@@ -56,6 +60,63 @@ class ActivityTests(unittest.TestCase):
             end_date=None,
         )
         self.assertIsNotNone(error)
+
+    def test_activity_leaderboard_uses_compact_table(self):
+        table = _activity_table(
+            [
+                {
+                    "username": "S5Chipper",
+                    "games": 12,
+                    "wins": 7,
+                    "losses": 5,
+                    "win_rate": 58.3,
+                    "mmr_change": 24,
+                    "mmr_games": 11,
+                }
+            ],
+            start_rank=1,
+        )
+        self.assertIn("Username", table)
+        self.assertIn("GP", table)
+        self.assertIn("WR", table)
+        self.assertIn("MMR Δ", table)
+        self.assertIn("+24", table)
+        self.assertNotIn("7W", table)
+        self.assertNotIn("captured", table)
+
+    def test_activity_leaderboard_sort_options(self):
+        entries = [
+            {
+                "username": "Games",
+                "games": 20,
+                "win_rate": 50.0,
+                "mmr_change": 5,
+                "mmr_games": 20,
+            },
+            {
+                "username": "WinRate",
+                "games": 10,
+                "win_rate": 70.0,
+                "mmr_change": 2,
+                "mmr_games": 10,
+            },
+            {
+                "username": "MMR",
+                "games": 8,
+                "win_rate": 60.0,
+                "mmr_change": 30,
+                "mmr_games": 8,
+            },
+        ]
+        self.assertEqual(sort_activity_entries(entries, "games")[0]["username"], "Games")
+        self.assertEqual(
+            sort_activity_entries(entries, "win_rate")[0]["username"],
+            "WinRate",
+        )
+        self.assertEqual(
+            sort_activity_entries(entries, "mmr_change")[0]["username"],
+            "MMR",
+        )
 
 
 if __name__ == "__main__":

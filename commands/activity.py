@@ -91,13 +91,86 @@ def _mmr_text(entry: dict) -> str:
     return f"MMR Δ {change_text}"
 
 
-def _activity_line(entry: dict, rank: int | None = None) -> str:
-    prefix = f"**{rank}.** " if rank is not None else ""
-    return (
-        f"{prefix}`{entry['username']}` — {entry['games']:,} GP • "
-        f"{entry['wins']:,}W–{entry['losses']:,}L • "
-        f"{entry['win_rate']:.1f}% WR • {_mmr_text(entry)}"
+def _activity_table(entries: list[dict], *, start_rank: int) -> str:
+    """Format activity rows like the primary fixed-width leaderboard."""
+    if not entries:
+        return "No activity was found."
+    display_names = []
+    username_width = min(
+        24,
+        max(len("Username"), max(len(entry["username"]) for entry in entries)),
     )
+    for entry in entries:
+        username = entry["username"]
+        display_names.append(
+            username
+            if len(username) <= username_width
+            else username[: username_width - 1] + "…"
+        )
+
+    ranks = [str(rank) for rank in range(start_rank, start_rank + len(entries))]
+    games = [f"{entry['games']:,}" for entry in entries]
+    win_rates = [f"{entry['win_rate']:.1f}%" for entry in entries]
+    mmr_changes = [
+        (
+            "N/A"
+            if int(entry["mmr_games"]) == 0
+            else f"{entry['mmr_change']:+g}"
+        )
+        for entry in entries
+    ]
+    rank_width = max(len("Rank"), max(map(len, ranks)))
+    games_width = max(len("GP"), max(map(len, games)))
+    win_rate_width = max(len("WR"), max(map(len, win_rates)))
+    mmr_width = max(len("MMR Δ"), max(map(len, mmr_changes)))
+    lines = [
+        (
+            f"{'Rank':>{rank_width}}  {'Username':<{username_width}}   "
+            f"{'GP':>{games_width}}  {'WR':>{win_rate_width}}  "
+            f"{'MMR Δ':>{mmr_width}}"
+        ),
+        (
+            f"{'-' * rank_width}  {'-' * username_width}   "
+            f"{'-' * games_width}  {'-' * win_rate_width}  "
+            f"{'-' * mmr_width}"
+        ),
+    ]
+    for rank, username, games_text, win_rate, mmr_change in zip(
+        ranks, display_names, games, win_rates, mmr_changes
+    ):
+        lines.append(
+            f"{rank:>{rank_width}}  {username:<{username_width}}   "
+            f"{games_text:>{games_width}}  {win_rate:>{win_rate_width}}  "
+            f"{mmr_change:>{mmr_width}}"
+        )
+    return "```\n" + "\n".join(lines) + "\n```"
+
+
+def sort_activity_entries(entries: list[dict], sort_by: str) -> list[dict]:
+    """Return activity entries in the selected leaderboard order."""
+    if sort_by == "win_rate":
+        key = lambda item: (
+            -item["win_rate"],
+            -item["games"],
+            -item["mmr_change"],
+            item["username"].casefold(),
+        )
+    elif sort_by == "mmr_change":
+        key = lambda item: (
+            int(item["mmr_games"]) == 0,
+            -item["mmr_change"],
+            -item["games"],
+            -item["win_rate"],
+            item["username"].casefold(),
+        )
+    else:
+        key = lambda item: (
+            -item["games"],
+            -item["win_rate"],
+            -item["mmr_change"],
+            item["username"].casefold(),
+        )
+    return sorted(entries, key=key)
 
 
 class ActivityLeaderboardView(discord.ui.View):
@@ -107,12 +180,14 @@ class ActivityLeaderboardView(discord.ui.View):
         entries: list[dict],
         season_name: str,
         period_label: str,
+        sort_label: str,
         requesting_user_id: int,
     ) -> None:
         super().__init__(timeout=180)
         self.entries = entries
         self.season_name = season_name
         self.period_label = period_label
+        self.sort_label = sort_label
         self.requesting_user_id = requesting_user_id
         self.page = 0
         self.total_pages = max(1, math.ceil(len(entries) / ACTIVITY_PAGE_SIZE))
@@ -134,18 +209,17 @@ class ActivityLeaderboardView(discord.ui.View):
     def build_embed(self) -> discord.Embed:
         start = self.page * ACTIVITY_PAGE_SIZE
         page_entries = self.entries[start:start + ACTIVITY_PAGE_SIZE]
-        lines = [
-            _activity_line(entry, start + index + 1)
-            for index, entry in enumerate(page_entries)
-        ]
         embed = discord.Embed(
             title=f"{self.season_name} — Activity Leaderboard",
-            description=f"*{self.period_label}*\n\n" + "\n".join(lines),
+            description=(
+                f"*{self.period_label}*\n\n"
+                + _activity_table(page_entries, start_rank=start + 1)
+            ),
             color=discord.Color.blurple(),
         )
         embed.set_footer(
             text=(
-                f"Sorted by games played, then win rate • Page "
+                f"Sorted by {self.sort_label} • Page "
                 f"{self.page + 1}/{self.total_pages} • {len(self.entries)} active players"
             )
         )
@@ -265,6 +339,14 @@ class ActivityCommands(
         days="Number of days to include. Defaults to 7.",
         start_date="Start date in YYYY-MM-DD. Use instead of days.",
         end_date="Optional inclusive end date in YYYY-MM-DD.",
+        sort_by="Ranking metric. Defaults to games played.",
+    )
+    @app_commands.choices(
+        sort_by=[
+            app_commands.Choice(name="Games Played", value="games"),
+            app_commands.Choice(name="Win Rate", value="win_rate"),
+            app_commands.Choice(name="MMR Change", value="mmr_change"),
+        ]
     )
     async def leaderboard(
         self,
@@ -272,6 +354,7 @@ class ActivityCommands(
         days: app_commands.Range[int, 1, 3650] | None = None,
         start_date: str | None = None,
         end_date: str | None = None,
+        sort_by: app_commands.Choice[str] | None = None,
     ) -> None:
         season, start_at, end_at, label, error = await self._context(
             interaction, days, start_date, end_date
@@ -286,10 +369,18 @@ class ActivityCommands(
                 f"No archived games were found during **{label}**.", ephemeral=True
             )
             return
+        sort_value = sort_by.value if sort_by is not None else "games"
+        sort_labels = {
+            "games": "games played, then win rate",
+            "win_rate": "win rate, then games played",
+            "mmr_change": "MMR change, then games played",
+        }
+        entries = sort_activity_entries(entries, sort_value)
         view = ActivityLeaderboardView(
             entries=entries,
             season_name=season_display_name(season),
             period_label=label,
+            sort_label=sort_labels[sort_value],
             requesting_user_id=interaction.user.id,
         )
         await interaction.response.send_message(embed=view.build_embed(), view=view)
