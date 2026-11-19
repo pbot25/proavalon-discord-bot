@@ -22,6 +22,7 @@ from database.seasons import (
     get_season_by_number,
     get_season_for_username,
     season_display_name,
+    season_uses_linked_accounts,
 )
 from proavalon.profile_scraper import (
     ProAvalonError,
@@ -90,6 +91,8 @@ async def resolve_link_season(
     username: str,
     active_season,
 ):
+    if active_season is not None and season_uses_linked_accounts(active_season):
+        return active_season
     matched = await get_season_for_username(
         guild_id,
         username,

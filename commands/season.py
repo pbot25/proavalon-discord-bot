@@ -9,10 +9,12 @@ from database.seasons import (
     count_voided_season_players,
     cleanup_ended_season_operational_data,
     create_season,
+    create_tournament_season,
     end_active_season,
     fetch_season_history,
     rename_active_season,
     season_display_name,
+    season_uses_linked_accounts,
     get_active_season,
     get_season_players,
     get_voided_season_players,
@@ -1534,11 +1536,18 @@ class SeasonCommands(
             color=discord.Color.blurple(),
         )
 
-        embed.add_field(
-            name="Required prefix",
-            value=f"`{season['required_prefix']}`",
-            inline=True,
-        )
+        if season_uses_linked_accounts(season):
+            embed.add_field(
+                name="Eligibility",
+                value="All 10 players must be linked",
+                inline=True,
+            )
+        else:
+            embed.add_field(
+                name="Required prefix",
+                value=f"`{season['required_prefix']}`",
+                inline=True,
+            )
 
         embed.add_field(
             name="Tracked game size",
@@ -2093,22 +2102,23 @@ class SeasonCommands(
             )
             return
 
-        required_prefix = str(
-            season["required_prefix"]
-        )
-
-        if not clean_username.casefold().startswith(
-            required_prefix.casefold()
-        ):
-            await interaction.response.send_message(
-                (
-                    f"`{clean_username}` does not begin with "
-                    f"the active season prefix "
-                    f"`{required_prefix}`."
-                ),
-                ephemeral=True,
+        if not season_uses_linked_accounts(season):
+            required_prefix = str(
+                season["required_prefix"]
             )
-            return
+
+            if not clean_username.casefold().startswith(
+                required_prefix.casefold()
+            ):
+                await interaction.response.send_message(
+                    (
+                        f"`{clean_username}` does not begin with "
+                        f"the active season prefix "
+                        f"`{required_prefix}`."
+                    ),
+                    ephemeral=True,
+                )
+                return
 
         created = await void_season_player(
             community_season_id=int(
@@ -2342,6 +2352,39 @@ class SeasonCommands(
                 f"`{season['required_prefix']}` are eligible.\n"
                 "Eligible accounts must have at least one "
                 "10-player game."
+            )
+        )
+
+    @app_commands.command(
+        name="tournament",
+        description="Starts a 10-player tournament using linked-account eligibility.",
+    )
+    @app_commands.describe(
+        name="Tournament display name, such as Winter Invitational.",
+    )
+    @bot_admin_only()
+    async def set_tournament(
+        self,
+        interaction: discord.Interaction,
+        name: str,
+    ) -> None:
+        if interaction.guild_id is None:
+            await interaction.response.send_message(
+                "This command can only be used in a server.", ephemeral=True
+            )
+            return
+        try:
+            season = await create_tournament_season(interaction.guild_id, name)
+        except (RuntimeError, ValueError) as error:
+            await interaction.response.send_message(str(error), ephemeral=True)
+            return
+        await interaction.response.send_message(
+            (
+                f"**{season_display_name(season)}** is now active in tournament mode.\n"
+                "There is no username-prefix requirement. A ProAvalon game is "
+                "tracked and eligible for recording only when all 10 players "
+                "are linked to Discord accounts for this tournament.\n"
+                "Players can register with `/account link`."
             )
         )
 

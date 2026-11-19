@@ -169,16 +169,24 @@ class Controller:
 
     def candidate(self, payload, *, exclude_room=None):
         active_season = payload.get("active_season") or {}
+        eligibility_mode = str(
+            active_season.get("eligibility_mode") or "prefix"
+        ).casefold()
         season_prefix = str(
             (active_season.get("required_prefix") or "")
             if "active_season" in payload
             else self.season_prefix
         ).strip().casefold()
-        if not season_prefix:
+        if eligibility_mode != "linked" and not season_prefix:
             return None
-        if season_prefix != self.reported_season_prefix:
-            print(f"Following Pbot's active season prefix: {season_prefix}")
-            self.reported_season_prefix = season_prefix
+        reported_rule = (
+            "linked tournament roster"
+            if eligibility_mode == "linked"
+            else season_prefix
+        )
+        if reported_rule != self.reported_season_prefix:
+            print(f"Following Pbot's active season eligibility: {reported_rule}")
+            self.reported_season_prefix = reported_rule
         links = payload.get("account_links") or {}
         voice_channels = payload.get("voice_channels") or []
         claimed_rooms = {
@@ -210,7 +218,14 @@ class Controller:
                 continue
             if room_id not in claimed_rooms:
                 continue
-            if not all(name.casefold().startswith(season_prefix) for name in players):
+            qualifies = (
+                all(name.casefold() in links for name in players)
+                if eligibility_mode == "linked"
+                else all(
+                    name.casefold().startswith(season_prefix) for name in players
+                )
+            )
+            if not qualifies:
                 continue
             linked_ids = {int(links[name.casefold()]) for name in players if name.casefold() in links}
             for channel in voice_channels:

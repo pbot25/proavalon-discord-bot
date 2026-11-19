@@ -55,6 +55,18 @@ def season_display_name(season) -> str:
     return f"Community Season {season['season_number']}"
 
 
+LINKED_SEASON_PREFIX = "__linked__"
+
+
+def season_uses_linked_accounts(season) -> bool:
+    """Return whether eligibility is the season's linked-account roster."""
+    try:
+        prefix = str(season["required_prefix"] or "")
+    except (KeyError, IndexError, TypeError):
+        return False
+    return prefix.casefold().startswith(LINKED_SEASON_PREFIX)
+
+
 async def get_active_season(
     guild_id: int,
 ):
@@ -197,6 +209,7 @@ async def get_season_for_username(
             SELECT *
             FROM community_seasons
             WHERE guild_id = ?
+              AND required_prefix NOT LIKE '__linked__%'
               AND ? LIKE required_prefix || '%' COLLATE NOCASE
             ORDER BY LENGTH(required_prefix) DESC, id DESC
             LIMIT 1
@@ -359,6 +372,59 @@ async def create_season(
             (cursor.lastrowid, guild_text),
         )
         return await created_cursor.fetchone()
+    finally:
+        await database.close()
+
+
+async def create_tournament_season(
+    guild_id: int,
+    display_name: str,
+):
+    """Create a linked-roster tournament with no username-prefix rule."""
+    canonical_name = display_name.strip()
+    if not canonical_name or len(canonical_name) > 100:
+        raise ValueError("Tournament name must be between 1 and 100 characters.")
+    if await get_active_season(guild_id) is not None:
+        raise RuntimeError("End the current season first.")
+
+    guild_text = _guild_id_text(guild_id)
+    database = await connect()
+    await _ensure_season_display_name_column(database)
+    try:
+        cursor = await database.execute(
+            """
+            SELECT COALESCE(MAX(season_number), 0) + 1 AS next_number
+            FROM community_seasons
+            WHERE guild_id = ?
+            """,
+            (guild_text,),
+        )
+        internal_number = int((await cursor.fetchone())["next_number"])
+        internal_prefix = f"{LINKED_SEASON_PREFIX}{internal_number}"
+        inserted = await database.execute(
+            """
+            INSERT INTO community_seasons(
+                guild_id, season_number, required_prefix, display_name,
+                tracked_player_count, started_at, ended_at, is_active
+            ) VALUES (?, ?, ?, ?, 10, ?, NULL, 1)
+            """,
+            (
+                guild_text,
+                internal_number,
+                internal_prefix,
+                canonical_name,
+                utc_now(),
+            ),
+        )
+        await database.commit()
+        created = await database.execute(
+            "SELECT * FROM community_seasons WHERE id = ?",
+            (inserted.lastrowid,),
+        )
+        return await created.fetchone()
+    except Exception:
+        await database.rollback()
+        raise
     finally:
         await database.close()
 

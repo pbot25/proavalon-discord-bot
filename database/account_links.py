@@ -146,6 +146,21 @@ async def repair_account_link_scopes_for_guild(
         for link in links:
             username = str(link["proavalon_username"] or "").strip()
             lowered = username.casefold()
+            current_number = link["season_number"]
+            current_scope = next(
+                (
+                    season for season in seasons
+                    if current_number is not None
+                    and int(season["season_number"]) == int(current_number)
+                ),
+                None,
+            )
+            if (
+                current_scope is not None
+                and str(current_scope["required_prefix"] or "")
+                .casefold().startswith("__linked__")
+            ):
+                continue
             target = next(
                 (
                     season
@@ -161,7 +176,6 @@ async def repair_account_link_scopes_for_guild(
                 continue
 
             target_number = int(target["season_number"])
-            current_number = link["season_number"]
             if current_number is not None and int(current_number) == target_number:
                 continue
 

@@ -439,7 +439,14 @@ class ProAvalonProfileScraper:
         await self._wait_for_rate_limit()
 
         encoded_username = quote(clean_username, safe="")
-        url = f"{self.BASE_URL}/profile/{encoded_username}"
+        # ProAvalon's profile can remain cached briefly after a match. A
+        # unique query value is required in addition to no-cache headers;
+        # otherwise an offline player's pregame rating may be returned after
+        # their postgame socket update has already been missed.
+        url = (
+            f"{self.BASE_URL}/profile/{encoded_username}"
+            f"?rating_refresh={time.time_ns()}"
+        )
 
         try:
             async with session.get(
@@ -634,6 +641,7 @@ class ProAvalonProfileScraper:
         url = (
             f"{self.BASE_URL}/ajax/profile/"
             f"getProfileData/{encoded_username}"
+            f"?rating_refresh={time.time_ns()}"
         )
 
         payload = await self._request_profile_payload(

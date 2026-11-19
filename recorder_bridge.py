@@ -13,7 +13,11 @@ from aiohttp import ClientSession, web
 import discord
 
 from database.discord_roles import get_active_season_linked_users
-from database.seasons import get_active_season, season_display_name
+from database.seasons import (
+    get_active_season,
+    season_display_name,
+    season_uses_linked_accounts,
+)
 from database.recording_integrations import (
     delete_recording_integration,
     get_recording_integration,
@@ -730,6 +734,9 @@ class RecorderBridge:
                 {
                     "season_number": int(season["season_number"]),
                     "required_prefix": str(season["required_prefix"]),
+                    "eligibility_mode": (
+                        "linked" if season_uses_linked_accounts(season) else "prefix"
+                    ),
                     "display_name": season_display_name(season),
                 }
                 if season is not None

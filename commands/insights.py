@@ -25,6 +25,7 @@ from utils.discord_users import parse_discord_user_id
 from database.seasons import (
     get_season_by_prefix,
     season_display_name,
+    season_uses_linked_accounts,
 )
 
 def fmt_date(v):
@@ -607,7 +608,15 @@ class Insights(commands.Cog):
     @bot_admin_only()
     async def show_bot_status(self,interaction:discord.Interaction):
         x=await bot_status_data(interaction.guild_id); s=x['active']; e=discord.Embed(title='ProAvalon Stats — Bot Status',color=discord.Color.blurple())
-        e.add_field(name='Active Season',value='None' if not s else f"**{season_display_name(s)}** • Prefix `{s['required_prefix']}`",inline=False)
+        season_text = 'None'
+        if s:
+            eligibility = (
+                'Linked tournament roster'
+                if season_uses_linked_accounts(s)
+                else f"Prefix `{s['required_prefix']}`"
+            )
+            season_text = f"**{season_display_name(s)}** • {eligibility}"
+        e.add_field(name='Active Season',value=season_text,inline=False)
         e.add_field(name='Tracked Data',value=f"{x['players']} players • {x['matches']} archived matches",inline=False)
         e.add_field(name='Commands Channel',value='Not set' if not x['commands'] else f"<#{x['commands']['channel_id']}>",inline=True)
         e.add_field(name='Feedback Channel',value='Not set' if not x['feedback'] else f"<#{x['feedback']['channel_id']}>",inline=True)

@@ -6,7 +6,10 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from database.account_links import get_preferred_link_for_discord
+from database.account_links import (
+    get_active_link_for_username,
+    get_preferred_link_for_discord,
+)
 from database.ratings import get_cached_rating, get_rating_extremes
 from database.voting_metrics import get_player_voting_metrics
 from database.assassination_stats import (
@@ -26,6 +29,7 @@ from database.seasons import (
     is_season_player_voided,
     register_season_player,
     season_display_name,
+    season_uses_linked_accounts,
 )
 from utils.discord_users import parse_discord_user_id
 from proavalon.profile_scraper import (
@@ -1719,17 +1723,24 @@ class StatsCommands(
             season_player_count = int(
                 active_season["tracked_player_count"]
             )
-            required_prefix = str(
-                active_season["required_prefix"]
-            )
-
-            is_prefix_eligible = (
-                profile.username.casefold().startswith(
-                    required_prefix.casefold()
+            if season_uses_linked_accounts(active_season):
+                active_link = await get_active_link_for_username(
+                    interaction.guild_id,
+                    profile.username,
+                    int(active_season["season_number"]),
                 )
-            )
+                is_season_eligible = active_link is not None
+            else:
+                required_prefix = str(
+                    active_season["required_prefix"]
+                )
+                is_season_eligible = (
+                    profile.username.casefold().startswith(
+                        required_prefix.casefold()
+                    )
+                )
 
-            if is_prefix_eligible:
+            if is_season_eligible:
                 season_game_size_key = (
                     f"{season_player_count}p"
                 )

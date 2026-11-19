@@ -170,10 +170,22 @@ class PbotBridgeClient:
             return await response.json()
 
     async def active_season_prefix(self) -> str | None:
+        rules = await self.active_season_rules()
+        if rules is None or rules["mode"] == "linked":
+            return None
+        return rules["prefix"] or None
+
+    async def active_season_rules(self) -> dict | None:
         payload = await self.snapshot()
         active_season = payload.get("active_season") or {}
-        prefix = str(active_season.get("required_prefix") or "").strip()
-        return prefix or None
+        if not active_season:
+            return None
+        mode = str(active_season.get("eligibility_mode") or "prefix").casefold()
+        return {
+            "mode": mode,
+            "prefix": str(active_season.get("required_prefix") or "").strip(),
+            "linked_usernames": set((payload.get("account_links") or {}).keys()),
+        }
 
     async def _claim_request(self, method: str, suffix: str, room_id: int) -> dict:
         if self.session is None:
@@ -253,7 +265,6 @@ class PbotBridgeClient:
         *,
         old_room_id: int,
         old_players: list[str],
-        season_prefix: str,
         minimum_overlap: int,
     ) -> dict | None:
         if self.session is None:
@@ -269,7 +280,14 @@ class PbotBridgeClient:
             return None
 
         previous = {name.casefold() for name in old_players}
-        prefix = season_prefix.casefold()
+        active_season = payload.get("active_season") or {}
+        if not active_season:
+            return None
+        eligibility_mode = str(
+            active_season.get("eligibility_mode") or "prefix"
+        ).casefold()
+        prefix = str(active_season.get("required_prefix") or "").casefold()
+        linked_usernames = set((payload.get("account_links") or {}).keys())
         claims = {
             int(claim["room_id"]): str(claim.get("recorder_id") or "")
             for claim in payload.get("room_claims") or []
@@ -296,7 +314,11 @@ class PbotBridgeClient:
                 and not lobby.get("password_locked", False)
                 and status != "finished"
                 and len(players) == 10
-                and all(name.casefold().startswith(prefix) for name in players)
+                and (
+                    all(name.casefold() in linked_usernames for name in players)
+                    if eligibility_mode == "linked"
+                    else all(name.casefold().startswith(prefix) for name in players)
+                )
                 and len(overlap) >= minimum_overlap
             ):
                 # Reserve the handoff target before closing the current
@@ -422,7 +444,7 @@ class LobbyWatcher:
         self,
         prefix: str,
         preferred_room_id: int | None = None,
-        prefix_provider=None,
+        eligibility_provider=None,
         room_claim=None,
         room_release=None,
         claim_delay_seconds: float = 0,
@@ -431,44 +453,71 @@ class LobbyWatcher:
         claim_delay_pending = claim_delay_seconds
         current_prefix = prefix
         normalized_prefix = current_prefix.casefold()
+        eligibility_mode = "prefix"
+        linked_usernames: set[str] = set()
         next_prefix_check = 0.0
-        print(f"Waiting for a public 10-player `{current_prefix}` lobby...")
+        print(
+            f"Waiting for a public 10-player `{current_prefix}` lobby..."
+            if current_prefix
+            else "Waiting for an eligible public 10-player lobby..."
+        )
         while True:
             self.raise_if_stopped()
             now = time.monotonic()
-            if prefix_provider is not None and now >= next_prefix_check:
+            if eligibility_provider is not None and now >= next_prefix_check:
                 next_prefix_check = now + 5.0
                 try:
-                    dynamic_prefix = await prefix_provider()
+                    rules = await eligibility_provider()
                 except (
                     aiohttp.ClientError,
                     asyncio.TimeoutError,
                     RuntimeError,
                     ValueError,
                 ):
-                    dynamic_prefix = current_prefix
+                    rules = {
+                        "mode": eligibility_mode,
+                        "prefix": current_prefix,
+                        "linked_usernames": linked_usernames,
+                    }
                 if (
-                    dynamic_prefix is None
-                    and normalized_prefix
+                    rules is None
+                    and (normalized_prefix or eligibility_mode == "linked")
                 ):
                     current_prefix = ""
                     normalized_prefix = ""
+                    eligibility_mode = "prefix"
+                    linked_usernames = set()
                     inspected.clear()
                     print(
                         "Pbot has no active season; lobby recording is paused."
                     )
                 elif (
-                    dynamic_prefix is not None
-                    and dynamic_prefix.casefold() != normalized_prefix
-                ):
-                    current_prefix = dynamic_prefix
-                    normalized_prefix = current_prefix.casefold()
-                    inspected.clear()
-                    print(
-                        "Active season changed; now waiting for a public "
-                        f"10-player `{current_prefix}` lobby..."
+                    rules is not None
+                    and (
+                        str(rules.get("mode") or "prefix").casefold()
+                        != eligibility_mode
+                        or str(rules.get("prefix") or "").casefold()
+                        != normalized_prefix
+                        or set(rules.get("linked_usernames") or set())
+                        != linked_usernames
                     )
-            if not normalized_prefix:
+                ):
+                    eligibility_mode = str(
+                        rules.get("mode") or "prefix"
+                    ).casefold()
+                    current_prefix = str(rules.get("prefix") or "")
+                    normalized_prefix = current_prefix.casefold()
+                    linked_usernames = set(
+                        rules.get("linked_usernames") or set()
+                    )
+                    inspected.clear()
+                    rule_text = (
+                        "10-player linked tournament roster"
+                        if eligibility_mode == "linked"
+                        else f"10-player `{current_prefix}` lobby"
+                    )
+                    print(f"Active season changed; now waiting for a public {rule_text}...")
+            if eligibility_mode != "linked" and not normalized_prefix:
                 self.changed.clear()
                 try:
                     await asyncio.wait_for(self.changed.wait(), timeout=1)
@@ -509,10 +558,15 @@ class LobbyWatcher:
                         continue
                 inspected.add(room_id)
                 roster = await self.inspect_roster(room_id)
-                if len(roster) == 10 and all(
-                    name.casefold().startswith(normalized_prefix)
-                    for name in roster
-                ):
+                qualifies = (
+                    all(name.casefold() in linked_usernames for name in roster)
+                    if eligibility_mode == "linked"
+                    else all(
+                        name.casefold().startswith(normalized_prefix)
+                        for name in roster
+                    )
+                )
+                if len(roster) == 10 and qualifies:
                     if status == "game in progress" and is_preferred:
                         print(
                             f"Reserved replacement room {room_id} started during "
@@ -1108,7 +1162,6 @@ async def record_selected_room(
                         replacement = await bridge.find_replacement(
                             old_room_id=room_id,
                             old_players=original_roster,
-                            season_prefix=args.season_prefix,
                             minimum_overlap=args.abandoned_replacement_overlap,
                         )
                         if replacement is not None:
@@ -1136,7 +1189,6 @@ async def record_selected_room(
                         replacement = await bridge.find_replacement(
                             old_room_id=room_id,
                             old_players=original_roster,
-                            season_prefix=args.season_prefix,
                             minimum_overlap=args.replacement_player_overlap,
                         )
                         if replacement is not None:
@@ -1283,13 +1335,21 @@ async def run(args) -> None:
             replacement = None
             try:
                 if bridge is not None:
-                    dynamic_prefix = await bridge.active_season_prefix()
-                    if dynamic_prefix is None:
+                    active_rules = await bridge.active_season_rules()
+                    if active_rules is None:
                         raise RuntimeError(
-                            "Pbot has no active season prefix configured."
+                            "Pbot has no active season configured."
                         )
-                    elif dynamic_prefix.casefold() != args.season_prefix.casefold():
-                        args.season_prefix = dynamic_prefix
+                    linked_mode = active_rules.get("mode") == "linked"
+                    args.season_prefix = (
+                        "" if linked_mode
+                        else str(active_rules.get("prefix") or "")
+                    )
+                    if linked_mode:
+                        print(
+                            "Following Pbot's linked-account tournament roster."
+                        )
+                    else:
                         print(
                             "Following Pbot's active season prefix: "
                             f"{args.season_prefix}"
@@ -1305,8 +1365,8 @@ async def run(args) -> None:
                 ) = await watcher.wait_for_qualifying_room(
                     args.season_prefix,
                     preferred_room_id=preferred_room_id,
-                    prefix_provider=(
-                        bridge.active_season_prefix
+                    eligibility_provider=(
+                        bridge.active_season_rules
                         if bridge is not None
                         else None
                     ),

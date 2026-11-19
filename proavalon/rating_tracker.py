@@ -29,6 +29,7 @@ from database.ratings import (
 from database.discord_roles import get_active_season_linked_users
 from database.seasons import (
     season_display_name,
+    season_uses_linked_accounts,
     get_all_active_seasons,
     register_season_player,
 )
@@ -520,8 +521,22 @@ class ProAvalonRatingTracker:
         seasons = await get_all_active_seasons()
         matched = []
         for season in seasons:
-            prefix = str(season["required_prefix"]).casefold()
-            if all(name.casefold().startswith(prefix) for name in names):
+            if season_uses_linked_accounts(season):
+                linked_rows = await get_active_season_linked_users(
+                    int(season["guild_id"]),
+                    int(season["season_number"]),
+                )
+                eligible = {
+                    str(row["proavalon_username"]).casefold()
+                    for row in linked_rows
+                }
+                qualifies = all(name.casefold() in eligible for name in names)
+            else:
+                prefix = str(season["required_prefix"]).casefold()
+                qualifies = all(
+                    name.casefold().startswith(prefix) for name in names
+                )
+            if qualifies:
                 matched.append(season)
         if not matched:
             return
@@ -644,7 +659,8 @@ class ProAvalonRatingTracker:
             # ProAvalon's profile API can trail the game result by several
             # seconds. Retry unresolved players instead of converting an old
             # pregame value into +0 or giving up as N/A after one lookup.
-            for attempt, retry_delay in enumerate((0, 5, 10, 15), start=1):
+            refresh_delays = (0, 5, 10, 20, 40, 60)
+            for attempt, retry_delay in enumerate(refresh_delays, start=1):
                 stale = [
                     name for name in real_players
                     if state["pre"].get(name.casefold()) is not None
@@ -674,7 +690,7 @@ class ProAvalonRatingTracker:
                     except Exception as error:
                         print(
                             f"Could not refresh offline postgame rating for "
-                            f"{name} (attempt {attempt}/4): "
+                            f"{name} (attempt {attempt}/{len(refresh_delays)}): "
                             f"{type(error).__name__}: {error}"
                         )
 
